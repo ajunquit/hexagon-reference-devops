@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hexagon:rabbitmq-policy:v1",
+  "title": "Hexagon RabbitMQ policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "apiVersion",
+    "kind",
+    "product",
+    "environment",
+    "virtualHost",
+    "destinations",
+    "consumers",
+    "workloadUserNames"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "pattern": "^(?:\\.\\./)+contracts/schemas/rabbitmq-policy-v1\\.schema\\.json$"
+    },
+    "apiVersion": {
+      "const": "hexagon.ec/rabbitmq-policy/v1"
+    },
+    "kind": {
+      "const": "RabbitMqPolicy"
+    },
+    "product": {
+      "$ref": "#/$defs/product"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "virtualHost": {
+      "$ref": "#/$defs/entityName"
+    },
+    "destinations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/destination"
+      }
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/consumer"
+      }
+    },
+    "workloadUserNames": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/workload"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/userName"
+      }
+    }
+  },
+  "$defs": {
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "environment": {
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "logicalId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "workload": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "entityName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "userName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]*$"
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "exchangeName"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/logicalId"
+        },
+        "exchangeName": {
+          "$ref": "#/$defs/entityName"
+        }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "queueName",
+        "deliveryLimit",
+        "deadLetter"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/logicalId"
+        },
+        "queueName": {
+          "$ref": "#/$defs/entityName"
+        },
+        "deliveryLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "deadLetter": {
+          "$ref": "#/$defs/deadLetter"
+        }
+      }
+    },
+    "deadLetter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "exchangeName": {
+          "$ref": "#/$defs/entityName"
+        },
+        "queueName": {
+          "$ref": "#/$defs/entityName"
+        },
+        "routingKey": {
+          "$ref": "#/$defs/entityName"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "exchangeName",
+              "queueName",
+              "routingKey"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "exchangeName"
+                  ]
+                },
+                {
+                  "required": [
+                    "queueName"
+                  ]
+                },
+                {
+                  "required": [
+                    "routingKey"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

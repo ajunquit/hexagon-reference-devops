@@ -1,0 +1,50 @@
+{
+  "$schema": "../contracts/schemas/application-release-v1.schema.json",
+  "apiVersion": "hexagon.ec/application-release/v1",
+  "kind": "ApplicationRelease",
+  "product": "hexagon-example",
+  "sources": [
+    {
+      "name": "web",
+      "repository": "ajunquit/hexagon-example-ng",
+      "commit": "1111111111111111111111111111111111111111",
+      "manifests": [
+        {
+          "path": ".hexagon/frontend-hosting-requirements.json",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "name": "backend",
+      "repository": "ajunquit/hexagon-example-dotnet-ml",
+      "commit": "2222222222222222222222222222222222222222",
+      "manifests": [
+        {
+          "path": ".hexagon/messaging-requirements.json",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "path": ".hexagon/backend-hosting-requirements.json",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    }
+  ],
+  "artifacts": {
+    "backend": {
+      "hexagon-example-api": "exampledev0001.azurecr.io/hexagon-example-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "hexagon-example-worker": "exampledev0001.azurecr.io/hexagon-example-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "hexagon-example-sales-worker": "exampledev0001.azurecr.io/hexagon-example-sales-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "web": {
+      "uri": "https://artifacts.example.test/releases/1111111111111111111111111111111111111111/web.tar.gz",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "databaseBootstrap": {
+      "repository": "ajunquit/hexagon-example-devops",
+      "commit": "3333333333333333333333333333333333333333",
+      "image": "exampledev0001.azurecr.io/database-bootstrap@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  }
+}

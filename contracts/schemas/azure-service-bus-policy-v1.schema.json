@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hexagon:azure-service-bus-policy:v1",
+  "title": "Hexagon Azure Service Bus policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "apiVersion",
+    "kind",
+    "product",
+    "environment",
+    "location",
+    "resourceGroupName",
+    "namespace",
+    "destinations",
+    "consumers",
+    "workloadPrincipalIds"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "pattern": "^(?:\\.\\./)+contracts/schemas/azure-service-bus-policy-v1\\.schema\\.json$"
+    },
+    "apiVersion": {
+      "const": "hexagon.ec/azure-service-bus-policy/v1"
+    },
+    "kind": {
+      "const": "AzureServiceBusPolicy"
+    },
+    "product": {
+      "$ref": "#/$defs/product"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "location": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+$"
+    },
+    "resourceGroupName": {
+      "$ref": "#/$defs/physicalName"
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "namespace": {
+      "$ref": "#/$defs/namespace"
+    },
+    "destinations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/destination"
+      }
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/consumer"
+      }
+    },
+    "workloadPrincipalIds": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/workload"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/uuid"
+      }
+    }
+  },
+  "$defs": {
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "environment": {
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "logicalId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "workload": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "physicalName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 90,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._()-]*$"
+    },
+    "entityName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "isoDuration": {
+      "type": "string",
+      "pattern": "^P(?=.+)(?:[0-9]+D)?(?:T(?=.+)(?:[0-9]+H)?(?:[0-9]+M)?(?:[0-9]+S)?)?$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "namespace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sku",
+        "publicNetworkAccessEnabled"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 50,
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
+        },
+        "sku": {
+          "enum": [
+            "Standard",
+            "Premium"
+          ]
+        },
+        "capacity": {
+          "enum": [
+            1,
+            2,
+            4,
+            8,
+            16
+          ]
+        },
+        "publicNetworkAccessEnabled": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "sku": {
+                "const": "Standard"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "capacity"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicName",
+        "defaultMessageTtl",
+        "duplicateDetectionEnabled",
+        "duplicateDetectionHistory"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/logicalId"
+        },
+        "topicName": {
+          "$ref": "#/$defs/entityName"
+        },
+        "defaultMessageTtl": {
+          "$ref": "#/$defs/isoDuration"
+        },
+        "duplicateDetectionEnabled": {
+          "type": "boolean"
+        },
+        "duplicateDetectionHistory": {
+          "$ref": "#/$defs/isoDuration"
+        }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "subscriptionName",
+        "maxDeliveryCount",
+        "lockDuration",
+        "defaultMessageTtl",
+        "deadLetterOnMessageExpiration"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/logicalId"
+        },
+        "subscriptionName": {
+          "$ref": "#/$defs/entityName"
+        },
+        "maxDeliveryCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "lockDuration": {
+          "$ref": "#/$defs/isoDuration"
+        },
+        "defaultMessageTtl": {
+          "$ref": "#/$defs/isoDuration"
+        },
+        "deadLetterOnMessageExpiration": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

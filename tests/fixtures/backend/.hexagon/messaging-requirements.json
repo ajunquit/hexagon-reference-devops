@@ -1,0 +1,42 @@
+{
+  "$schema": "schemas/messaging-requirements-v1.schema.json",
+  "apiVersion": "hexagon.ec/messaging-requirements/v1",
+  "kind": "BackendMessagingRequirements",
+  "product": "hexagon-example",
+  "component": "backend",
+  "provider": "azure-service-bus",
+  "destinations": [
+    {
+      "id": "integration-events",
+      "publisherWorkloads": [
+        "hexagon-example-api",
+        "hexagon-example-worker",
+        "hexagon-example-sales-worker"
+      ],
+      "eventTypes": [
+        "CustomerCreatedIntegrationEvent"
+      ]
+    }
+  ],
+  "consumers": [
+    {
+      "id": "worker",
+      "workload": "hexagon-example-worker",
+      "destination": "integration-events",
+      "routing": {
+        "mode": "all"
+      }
+    },
+    {
+      "id": "sales-worker",
+      "workload": "hexagon-example-sales-worker",
+      "destination": "integration-events",
+      "routing": {
+        "mode": "include",
+        "eventTypes": [
+          "CustomerCreatedIntegrationEvent"
+        ]
+      }
+    }
+  ]
+}

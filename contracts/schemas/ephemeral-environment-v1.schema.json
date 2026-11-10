@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["apiVersion", "inventory", "location", "oidcPrefix", "bootstrapContainer", "expiresAt", "reviewerIds", "protectedResourceGroups"],
+  "properties": {
+    "apiVersion": { "const": "hexagon.ec/ephemeral-environment/v1" },
+    "inventory": { "type": "object" },
+    "location": { "type": "string", "pattern": "^[a-z0-9]{2,30}$" },
+    "oidcPrefix": { "type": "string", "pattern": "^repo:[A-Za-z0-9-]+(@[1-9][0-9]*)?/hexagon-[a-z0-9-]+-devops(@[1-9][0-9]*)?$" },
+    "bootstrapContainer": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" },
+    "expiresAt": { "type": "integer", "minimum": 1 },
+    "reviewerIds": { "type": "array", "maxItems": 6, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+    "protectedResourceGroups": { "type": "array", "minItems": 2, "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^rg-[a-z0-9-]{1,76}$" } }
+  }
+}

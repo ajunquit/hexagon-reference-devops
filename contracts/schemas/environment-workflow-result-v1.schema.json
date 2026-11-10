@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "status",
+    "applicationVerified",
+    "operation",
+    "mode",
+    "rootId",
+    "details",
+    "code"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/environment-workflow-result/v1"
+    },
+    "status": {
+      "enum": [
+        "Validated",
+        "Prepared",
+        "Verified",
+        "Destroyed",
+        "Failed",
+        "Quiesced",
+        "Blocked",
+        "Unverified"
+      ]
+    },
+    "applicationVerified": {
+      "const": false
+    },
+    "operation": {
+      "enum": [
+        "Create",
+        "Destroy"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "Validate",
+        "Prepare",
+        "Apply",
+        "Sync",
+        "Quiesce"
+      ]
+    },
+    "rootId": {
+      "enum": [
+        "hosting",
+        "messaging"
+      ]
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reviewSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "clientId": {
+          "type": "string",
+          "pattern": "^[0-9a-f-]{36}$"
+        },
+        "tenantId": {
+          "type": "string",
+          "pattern": "^[0-9a-f-]{36}$"
+        },
+        "subscriptionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f-]{36}$"
+        },
+        "githubEnvironment": {
+          "type": "string",
+          "pattern": "^(dev|staging)-run-[1-9][0-9]*-[1-9][0-9]*$"
+        }
+      }
+    },
+    "code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^lifecycle[.][A-Za-z0-9.]+$"
+    }
+  }
+}

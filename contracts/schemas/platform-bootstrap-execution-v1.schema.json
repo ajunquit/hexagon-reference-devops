@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["apiVersion", "mode", "stage", "status", "readyToApply", "applyImplemented", "platformVerified", "checks", "details"],
+  "properties": {
+    "apiVersion": { "const": "hexagon.ec/platform-bootstrap-execution/v1" },
+    "mode": { "enum": ["Prepare", "Apply", "Migrate", "Verify"] },
+    "stage": { "enum": ["State", "Access", "GitHub"] },
+    "status": { "enum": ["Prepared", "Applied", "Migrated", "Verified", "Unverified", "Blocked"] },
+    "readyToApply": { "type": "boolean" }, "applyImplemented": { "const": true }, "platformVerified": { "type": "boolean" },
+    "checks": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["code", "status"], "properties": { "code": { "type": "string", "pattern": "^bootstrap[.][A-Za-z0-9.]+$" }, "status": { "enum": ["Pass", "Pending", "Blocked"] } } } },
+    "details": { "type": "object", "additionalProperties": false, "properties": { "reviewPath": { "type": "string" }, "reviewSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "Prepared" } } }, "then": { "properties": { "readyToApply": { "const": true } } }, "else": { "properties": { "readyToApply": { "const": false } } } },
+    { "if": { "properties": { "status": { "const": "Verified" } } }, "then": { "properties": { "platformVerified": { "const": true } } }, "else": { "properties": { "platformVerified": { "const": false } } } }
+  ]
+}

@@ -1,0 +1,151 @@
+name: Apocalypse (Destroy Infrastructure)
+run-name: Apocalypse ${{ inputs.environment }} / ${{ inputs.instance_id }} / ${{ inputs.root }} / ${{ inputs.mode }}
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment (production support requires phase 9D)
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      instance_id:
+        description: Reserved ephemeral instance ID (run-ID-attempt)
+        required: true
+        type: string
+      mode:
+        description: Prepare the plan, then review it before a separate Apply dispatch
+        required: true
+        type: choice
+        options: [Quiesce, Prepare, Apply, Sync]
+      root:
+        description: Terraform root (dependency order is enforced)
+        required: true
+        type: choice
+        options: [hosting, messaging]
+      definition_sha256:
+        description: SHA-256 of the tracked instance definition on main
+        required: true
+        type: string
+      review_sha256:
+        description: Required for Apply; hash returned by Prepare
+        required: false
+        type: string
+      confirmation:
+        description: Required for Apply or Quiesce; exact OPERATION product environment instance
+        required: false
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: environment-${{ github.repository }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    outputs:
+      client_id: ${{ steps.definition.outputs.client_id }}
+      tenant_id: ${{ steps.definition.outputs.tenant_id }}
+      subscription_id: ${{ steps.definition.outputs.subscription_id }}
+      environment_name: ${{ steps.definition.outputs.environment_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate trusted instance and GitHub protections
+        id: definition
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          INSTANCE_ID: ${{ inputs.instance_id }}
+          DEFINITION_SHA256: ${{ inputs.definition_sha256 }}
+        run: |
+          $result = ./scripts/Invoke-EnvironmentWorkflow.ps1 -Operation Destroy -Mode Validate -Environment $env:TARGET_ENVIRONMENT -InstanceId $env:INSTANCE_ID -DefinitionSha256 $env:DEFINITION_SHA256
+          if ($LASTEXITCODE -ne 0) { throw 'Instance definition or GitHub protections are invalid.' }
+          $value = $result -join "`n" | ConvertFrom-Json
+          "client_id=$($value.details.clientId)" >> $env:GITHUB_OUTPUT
+          "tenant_id=$($value.details.tenantId)" >> $env:GITHUB_OUTPUT
+          "subscription_id=$($value.details.subscriptionId)" >> $env:GITHUB_OUTPUT
+          "environment_name=$($value.details.githubEnvironment)" >> $env:GITHUB_OUTPUT
+
+  execute:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ needs.validate.outputs.environment_name }}
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Check exact environment bindings before authentication
+        shell: pwsh
+        env:
+          EXPECTED_CLIENT: ${{ needs.validate.outputs.client_id }}
+          EXPECTED_TENANT: ${{ needs.validate.outputs.tenant_id }}
+          EXPECTED_SUBSCRIPTION: ${{ needs.validate.outputs.subscription_id }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          if ($env:AZURE_CLIENT_ID -cne $env:EXPECTED_CLIENT -or $env:AZURE_TENANT_ID -cne $env:EXPECTED_TENANT -or $env:AZURE_SUBSCRIPTION_ID -cne $env:EXPECTED_SUBSCRIPTION) { throw 'Environment binding drift.' }
+      - name: Authenticate with the isolated instance identity
+        uses: Azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
+        with:
+          client-id: ${{ needs.validate.outputs.client_id }}
+          tenant-id: ${{ needs.validate.outputs.tenant_id }}
+          subscription-id: ${{ needs.validate.outputs.subscription_id }}
+          audience: api://AzureADTokenExchange
+      - name: Verify real scope isolation
+        shell: pwsh
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          INSTANCE_ID: ${{ inputs.instance_id }}
+        run: |
+          if ($env:INSTANCE_ID -cnotmatch '^run-[1-9][0-9]*-[1-9][0-9]*$') { throw 'Invalid instance.' }
+          ./scripts/Test-EphemeralFederation.ps1 -Definition "./.config/environments/$env:TARGET_ENVIRONMENT/$env:INSTANCE_ID/definition.json"
+      - name: Run the reviewed lifecycle stage
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEXAGON_APPLICATIONS_READ_TOKEN: ${{ secrets.HEXAGON_APPLICATIONS_READ_TOKEN }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          INSTANCE_ID: ${{ inputs.instance_id }}
+          STAGE_MODE: ${{ inputs.mode }}
+          ROOT_ID: ${{ inputs.root }}
+          DEFINITION_SHA256: ${{ inputs.definition_sha256 }}
+          REVIEW_SHA256: ${{ inputs.review_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: ./scripts/Invoke-EnvironmentWorkflow.ps1 -Operation Destroy -Mode $env:STAGE_MODE -Environment $env:TARGET_ENVIRONMENT -InstanceId $env:INSTANCE_ID -DefinitionSha256 $env:DEFINITION_SHA256 -RootId $env:ROOT_ID -ReviewSha256 $env:REVIEW_SHA256 -Confirmation $env:CONFIRMATION
+      - name: Report recovery location
+        if: always()
+        shell: pwsh
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          INSTANCE_ID: ${{ inputs.instance_id }}
+        run: |
+          "Inventory and plans are retained in the reserved instance container. Use Sync, then prepare a new plan after any interrupted operation. Application verification is pending." >> $env:GITHUB_STEP_SUMMARY

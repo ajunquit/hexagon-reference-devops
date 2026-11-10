@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hexagon:local-messaging-bindings:v1",
+  "title": "Hexagon local messaging bindings v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "product",
+    "provider",
+    "workloads"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "apiVersion": {
+      "const": "hexagon.ec/local-messaging-bindings/v1"
+    },
+    "kind": {
+      "const": "LocalMessagingBindings"
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "provider": {
+      "enum": [
+        "azure-service-bus",
+        "aws-sns-sqs",
+        "rabbitmq"
+      ]
+    },
+    "workloads": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "propertyNames": {
+          "pattern": "^(?:ConnectionStrings__servicebus|AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION)|Messaging__(?:AzureServiceBus|Aws|RabbitMq)__[A-Za-z0-9_-]+(?:__[A-Za-z0-9_-]+)*)$"
+        },
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

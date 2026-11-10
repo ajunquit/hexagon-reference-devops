@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ComponentBuild v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "product",
+    "component",
+    "repository",
+    "commit",
+    "manifests",
+    "dependencies",
+    "artifacts"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/component-build/v1"
+    },
+    "kind": {
+      "const": "ComponentBuild"
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "component": {
+      "enum": [
+        "backend",
+        "web",
+        "devops"
+      ]
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "manifests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "repository",
+          "commit",
+          "version",
+          "packages"
+        ],
+        "properties": {
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9]+[.][0-9]+[.][0-9]+-dev[.][0-9]+$"
+          },
+          "packages": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "sha256"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^Hexagon[.]Core[.][A-Za-z0-9.]+$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "file",
+          "sha256"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "kind": {
+            "enum": [
+              "static-bundle",
+              "oci-image"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]+$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "imageDigest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "platform": {
+            "enum": [
+              "linux/amd64",
+              "linux/arm64"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "oci-image"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "imageDigest",
+                "platform"
+              ]
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "imageDigest"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "platform"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

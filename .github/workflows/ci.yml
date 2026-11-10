@@ -1,0 +1,133 @@
+name: DevOps CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: devops-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-build:
+    needs: [messaging-integration, database-integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Validate workflow syntax
+        shell: bash
+        run: |
+          tool_dir="$RUNNER_TEMP/hexagon-actionlint"
+          plugin_cache="$RUNNER_TEMP/terraform-plugins"
+          mkdir -p "$tool_dir" "$plugin_cache"
+          echo "TF_PLUGIN_CACHE_DIR=$plugin_cache" >> "$GITHUB_ENV"
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz -o "$tool_dir/actionlint.tar.gz"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $tool_dir/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$tool_dir/actionlint.tar.gz" -C "$tool_dir" actionlint
+          "$tool_dir/actionlint" -shellcheck= .github/workflows/ci.yml .github/workflows/platform-diagnostic.yml .github/workflows/genesis.yml .github/workflows/apocalypse.yml .github/workflows/delivery.yml
+      - name: Verify the pinned static content client without deploying
+        shell: pwsh
+        run: |
+          ./scripts/Install-StaticWebClient.ps1
+          ./tests/Test-StaticWebClient.ps1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22.14.0
+      - name: Prepare the locked Chromium protocol tests
+        shell: pwsh
+        run: |
+          npm ci --prefix acceptance --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'Browser dependency installation failed.' }
+          node acceptance/node_modules/playwright/cli.js install --with-deps chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed.' }
+      - name: Verify contracts, sources and Terraform
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.HEXAGON_APPLICATIONS_READ_TOKEN || github.token }}
+        run: ./scripts/Test-Repository.ps1 -VerifySources
+      - name: Build verified operational OCI artifact
+        shell: pwsh
+        run: ./scripts/build-operation-artifacts.ps1 -Commit $env:GITHUB_SHA
+      - name: Retain operational candidate
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: operations-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/operations/*.oci.tar
+            artifacts/operations/build.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  messaging-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: azure-service-bus
+            test-class: AzureRuntimeTests
+          - provider: aws-sns-sqs
+            test-class: AwsRuntimeTests
+          - provider: rabbitmq
+            test-class: RabbitMqRuntimeTests
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Verify real broker operations
+        shell: pwsh
+        env:
+          HEXAGON_RUN_BROKER_TESTS: '1'
+          TEST_CLASS: ${{ matrix.test-class }}
+        run: |
+          dotnet test operations/Hexagon.Messaging.Operations.Tests -c Release -warnaserror --filter "FullyQualifiedName~$env:TEST_CLASS" --logger trx --results-directory artifacts/integration
+          if ($LASTEXITCODE -ne 0) { throw 'Broker integration tests failed.' }
+      - name: Verify local topology lifecycle
+        shell: pwsh
+        env:
+          MESSAGING_PROVIDER: ${{ matrix.provider }}
+        run: ./tests/Test-LocalMessagingRuntime.ps1 -Provider $env:MESSAGING_PROVIDER -UseExamplePolicy -AcceptLicense
+      - name: Retain integration evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: messaging-tests-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/integration/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+  database-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Verify PostgreSQL runtime permissions and RLS
+        shell: pwsh
+        run: |
+          dotnet test operations/Hexagon.Messaging.Operations.Tests -c Release -warnaserror --filter 'Category=Database'
+          if ($LASTEXITCODE -ne 0) { throw 'Database permission tests failed.' }

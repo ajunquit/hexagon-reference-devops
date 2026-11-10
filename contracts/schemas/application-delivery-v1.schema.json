@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ApplicationDelivery v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "releaseSha256", "candidates"],
+  "properties": {
+    "apiVersion": { "const": "hexagon.ec/application-delivery/v1" },
+    "releaseSha256": { "$ref": "#/$defs/hash" },
+    "candidates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["backend", "web", "devops"],
+      "properties": {
+        "backend": { "$ref": "#/$defs/candidate" },
+        "web": { "$ref": "#/$defs/candidate" },
+        "devops": { "$ref": "#/$defs/candidate" }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runId", "runAttempt", "artifactId", "archiveSha256"],
+      "properties": {
+        "runId": { "type": "integer", "minimum": 1 },
+        "runAttempt": { "type": "integer", "minimum": 1 },
+        "artifactId": { "type": "integer", "minimum": 1 },
+        "archiveSha256": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}

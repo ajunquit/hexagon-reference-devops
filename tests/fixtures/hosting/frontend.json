@@ -1,0 +1,32 @@
+{
+  "$schema": "./schemas/frontend-hosting-requirements-v2.schema.json",
+  "apiVersion": "hexagon.ec/frontend-hosting-requirements/v2",
+  "kind": "FrontendHostingRequirements",
+  "product": "hexagon-example",
+  "component": "web",
+  "artifact": {
+    "type": "static-spa",
+    "path": "dist/hexagon-example-ng/browser"
+  },
+  "routing": {
+    "fallback": "/index.html"
+  },
+  "runtimeConfiguration": {
+    "path": "/runtime-config.json",
+    "visibility": "public",
+    "bindings": [
+      {
+        "key": "apiUrl",
+        "source": "product-api",
+        "type": "public-url",
+        "required": true
+      },
+      {
+        "key": "authentication",
+        "source": "hexagon-auth",
+        "type": "oidc-public-client",
+        "required": true
+      }
+    ]
+  }
+}

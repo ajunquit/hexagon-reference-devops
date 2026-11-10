@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableSdkContainerSupport>true</EnableSdkContainerSupport><ContainerUser>app</ContainerUser>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" /><PackageReference Include="Npgsql" />
+    <InternalsVisibleTo Include="Hexagon.Messaging.Operations.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hexagon:platform-bootstrap-result:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "mode",
+    "status",
+    "readyToApply",
+    "applyImplemented",
+    "definitionSha256",
+    "schemaSha256",
+    "product",
+    "repository",
+    "checks",
+    "operations"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/platform-bootstrap-result/v1"
+    },
+    "kind": {
+      "const": "PlatformBootstrapResult"
+    },
+    "mode": {
+      "enum": [
+        "Validate",
+        "Plan"
+      ]
+    },
+    "status": {
+      "enum": [
+        "Validated",
+        "Planned",
+        "Unverified",
+        "Blocked",
+        "Invalid"
+      ]
+    },
+    "readyToApply": {
+      "const": false
+    },
+    "applyImplemented": {
+      "const": false
+    },
+    "definitionSha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "schemaSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "product": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repository": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "status"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^bootstrap[.][A-Za-z0-9.]+$"
+          },
+          "status": {
+            "enum": [
+              "Pass",
+              "Pending",
+              "Blocked"
+            ]
+          }
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "executor",
+          "action",
+          "dependsOn",
+          "target",
+          "state",
+          "desired"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]*$"
+          },
+          "executor": {
+            "enum": [
+              "Terraform",
+              "GitHubApi",
+              "Workflow"
+            ]
+          },
+          "action": {
+            "enum": [
+              "Inspect",
+              "Create",
+              "Reconcile",
+              "None"
+            ]
+          },
+          "dependsOn": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "target": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "Unknown",
+              "Absent",
+              "Present",
+              "Drift"
+            ]
+          },
+          "desired": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

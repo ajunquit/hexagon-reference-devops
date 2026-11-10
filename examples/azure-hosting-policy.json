@@ -1,0 +1,53 @@
+{
+  "$schema": "../contracts/schemas/azure-hosting-policy-v1.schema.json",
+  "apiVersion": "hexagon.ec/azure-hosting-policy/v1",
+  "kind": "AzureHostingPolicy",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "infrastructure": {
+    "location": "eastus2",
+    "resource_group_name": "rg-example-dev-hosting",
+    "name_prefix": "example-dev-0001",
+    "registry_name": "exampledev0001",
+    "virtual_network_cidr": "10.42.0.0/16",
+    "application_subnet_cidr": "10.42.0.0/23",
+    "database_subnet_cidr": "10.42.2.0/24",
+    "database_name": "hexagon_example",
+    "database_sku": "B_Standard_B1ms",
+    "database_storage_mb": 32768,
+    "auth": {
+      "authority": "https://auth.example.test/realms/hexagon",
+      "client_id": "example-web"
+    },
+    "tags": {}
+  },
+  "workloads": {
+    "hexagon-example-api": {
+      "name": "example-dev-0",
+      "cpu": 0.5,
+      "memory": "1Gi",
+      "min_replicas": 1,
+      "max_replicas": 2,
+      "environment": {},
+      "secret_references": {}
+    },
+    "hexagon-example-worker": {
+      "name": "example-dev-1",
+      "cpu": 0.5,
+      "memory": "1Gi",
+      "min_replicas": 1,
+      "max_replicas": 2,
+      "environment": {},
+      "secret_references": {}
+    },
+    "hexagon-example-sales-worker": {
+      "name": "example-dev-2",
+      "cpu": 0.5,
+      "memory": "1Gi",
+      "min_replicas": 1,
+      "max_replicas": 2,
+      "environment": {},
+      "secret_references": {}
+    }
+  }
+}

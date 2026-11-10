@@ -1,0 +1,51 @@
+{
+  "$schema": "../contracts/schemas/azure-service-bus-policy-v1.schema.json",
+  "apiVersion": "hexagon.ec/azure-service-bus-policy/v1",
+  "kind": "AzureServiceBusPolicy",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "location": "eastus2",
+  "resourceGroupName": "rg-hexagon-example-dev",
+  "tags": {
+    "environment": "dev",
+    "managed-by": "terraform",
+    "product": "hexagon-example"
+  },
+  "namespace": {
+    "name": "sb-hexagon-example-dev-0001",
+    "sku": "Standard",
+    "publicNetworkAccessEnabled": true
+  },
+  "destinations": [
+    {
+      "id": "integration-events",
+      "topicName": "integration-events",
+      "defaultMessageTtl": "P14D",
+      "duplicateDetectionEnabled": true,
+      "duplicateDetectionHistory": "PT10M"
+    }
+  ],
+  "consumers": [
+    {
+      "id": "worker",
+      "subscriptionName": "worker",
+      "maxDeliveryCount": 10,
+      "lockDuration": "PT1M",
+      "defaultMessageTtl": "P14D",
+      "deadLetterOnMessageExpiration": true
+    },
+    {
+      "id": "sales-worker",
+      "subscriptionName": "sales-worker",
+      "maxDeliveryCount": 10,
+      "lockDuration": "PT1M",
+      "defaultMessageTtl": "P14D",
+      "deadLetterOnMessageExpiration": true
+    }
+  ],
+  "workloadPrincipalIds": {
+    "hexagon-example-api": "00000000-0000-0000-0000-000000000001",
+    "hexagon-example-worker": "00000000-0000-0000-0000-000000000002",
+    "hexagon-example-sales-worker": "00000000-0000-0000-0000-000000000003"
+  }
+}

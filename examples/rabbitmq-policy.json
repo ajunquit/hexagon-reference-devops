@@ -1,0 +1,40 @@
+{
+  "$schema": "../contracts/schemas/rabbitmq-policy-v1.schema.json",
+  "apiVersion": "hexagon.ec/rabbitmq-policy/v1",
+  "kind": "RabbitMqPolicy",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "virtualHost": "hexagon-example-dev",
+  "destinations": [
+    {
+      "id": "integration-events",
+      "exchangeName": "hexagon-example.dev.integration-events"
+    }
+  ],
+  "consumers": [
+    {
+      "id": "worker",
+      "queueName": "hexagon-example.dev.worker",
+      "deliveryLimit": 5,
+      "deadLetter": {
+        "enabled": false
+      }
+    },
+    {
+      "id": "sales-worker",
+      "queueName": "hexagon-example.dev.sales-worker",
+      "deliveryLimit": 5,
+      "deadLetter": {
+        "enabled": true,
+        "exchangeName": "hexagon-example.dev.sales-worker.dlx",
+        "queueName": "hexagon-example.dev.sales-worker.dlq",
+        "routingKey": "hexagon-example.dev.sales-worker.dead-letter"
+      }
+    }
+  ],
+  "workloadUserNames": {
+    "hexagon-example-api": "hexagon-example-dev-api",
+    "hexagon-example-worker": "hexagon-example-dev-worker",
+    "hexagon-example-sales-worker": "hexagon-example-dev-sales-worker"
+  }
+}

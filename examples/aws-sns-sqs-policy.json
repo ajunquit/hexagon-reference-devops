@@ -1,0 +1,52 @@
+{
+  "$schema": "../contracts/schemas/aws-sns-sqs-policy-v1.schema.json",
+  "apiVersion": "hexagon.ec/aws-sns-sqs-policy/v1",
+  "kind": "AwsSnsSqsPolicy",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "region": "us-east-1",
+  "kmsAliasName": "hexagon-example-dev-messaging",
+  "tags": {
+    "environment": "dev",
+    "managed-by": "terraform",
+    "product": "hexagon-example"
+  },
+  "destinations": [
+    {
+      "id": "integration-events",
+      "topicName": "hexagon-example-dev-integration-events"
+    }
+  ],
+  "consumers": [
+    {
+      "id": "worker",
+      "queueName": "hexagon-example-dev-worker",
+      "visibilityTimeoutSeconds": 60,
+      "messageRetentionSeconds": 345600,
+      "receiveMessageWaitTimeSeconds": 20,
+      "retryVisibilityTimeoutSeconds": 30,
+      "redrive": {
+        "enabled": false
+      }
+    },
+    {
+      "id": "sales-worker",
+      "queueName": "hexagon-example-dev-sales-worker",
+      "visibilityTimeoutSeconds": 60,
+      "messageRetentionSeconds": 345600,
+      "receiveMessageWaitTimeSeconds": 20,
+      "retryVisibilityTimeoutSeconds": 30,
+      "redrive": {
+        "enabled": true,
+        "deadLetterQueueName": "hexagon-example-dev-sales-worker-dlq",
+        "maxReceiveCount": 5,
+        "deadLetterMessageRetentionSeconds": 1209600
+      }
+    }
+  ],
+  "workloadRoleNames": {
+    "hexagon-example-api": "hexagon-example-dev-api",
+    "hexagon-example-worker": "hexagon-example-dev-worker",
+    "hexagon-example-sales-worker": "hexagon-example-dev-sales-worker"
+  }
+}

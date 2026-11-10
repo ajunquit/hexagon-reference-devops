@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "apiVersion",
+    "kind",
+    "product",
+    "environment",
+    "infrastructure",
+    "workloads"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "pattern": "^(?:\\.\\./)+contracts/schemas/azure-hosting-policy-v1\\.schema\\.json$"
+    },
+    "apiVersion": {
+      "const": "hexagon.ec/azure-hosting-policy/v1"
+    },
+    "kind": {
+      "const": "AzureHostingPolicy"
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "environment": {
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
+    },
+    "infrastructure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "location",
+        "resource_group_name",
+        "name_prefix",
+        "registry_name",
+        "virtual_network_cidr",
+        "application_subnet_cidr",
+        "database_subnet_cidr",
+        "database_name",
+        "database_sku",
+        "database_storage_mb",
+        "auth",
+        "tags"
+      ],
+      "properties": {
+        "location": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resource_group_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name_prefix": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,18}$"
+        },
+        "registry_name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]{4,49}$"
+        },
+        "virtual_network_cidr": {
+          "type": "string"
+        },
+        "application_subnet_cidr": {
+          "type": "string"
+        },
+        "database_subnet_cidr": {
+          "type": "string"
+        },
+        "database_name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,62}$"
+        },
+        "database_sku": {
+          "type": "string"
+        },
+        "database_storage_mb": {
+          "type": "integer",
+          "minimum": 32768
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority",
+            "client_id"
+          ],
+          "properties": {
+            "authority": {
+              "type": "string",
+              "pattern": "^https://[A-Za-z0-9.-]+/[^?#@]+[^/]$"
+            },
+            "client_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]+$"
+            }
+          }
+        },
+        "tags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "acceptance_fixture": {
+          "type": "object",
+          "required": [
+            "instanceId",
+            "subjectId",
+            "tenant",
+            "otherTenant"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "otherTenant": {
+              "type": "string",
+              "pattern": "^e2e-run-[1-9][0-9]*-[1-9][0-9]*-b$"
+            },
+            "tenant": {
+              "type": "string",
+              "pattern": "^e2e-run-[1-9][0-9]*-[1-9][0-9]*-a$"
+            },
+            "subjectId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "instanceId": {
+              "type": "string",
+              "pattern": "^run-[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$"
+            }
+          }
+        }
+      }
+    },
+    "workloads": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,62}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "cpu",
+          "memory",
+          "min_replicas",
+          "max_replicas",
+          "environment",
+          "secret_references"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+          },
+          "cpu": {
+            "enum": [
+              0.25,
+              0.5,
+              0.75,
+              1,
+              1.25,
+              1.5,
+              1.75,
+              2
+            ]
+          },
+          "memory": {
+            "type": "string"
+          },
+          "min_replicas": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_replicas": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "environment": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "secret_references": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "secret_uri",
+                "vault_resource_id"
+              ],
+              "properties": {
+                "secret_uri": {
+                  "type": "string",
+                  "pattern": "^https://[a-z0-9-]+\\.vault\\.azure\\.net/secrets/[A-Za-z0-9-]+(?:/[a-f0-9]{32})?$"
+                },
+                "vault_resource_id": {
+                  "type": "string",
+                  "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[A-Za-z0-9_.()-]+/providers/Microsoft.KeyVault/vaults/[a-zA-Z0-9-]+$"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

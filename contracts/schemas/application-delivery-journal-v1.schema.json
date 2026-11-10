@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["apiVersion", "product", "environment", "instanceId", "releaseSha256", "deliverySha256", "targetSha256", "iacCommit", "revision", "images", "jobs", "maintenanceSha256", "plan", "activated"],
+  "properties": {
+    "apiVersion": { "const": "hexagon.ec/application-delivery-journal/v1" },
+    "product": { "type": "string", "pattern": "^hexagon-[a-z][a-z0-9-]*$" },
+    "environment": { "enum": ["dev", "staging"] },
+    "instanceId": { "type": "string", "pattern": "^run-[1-9][0-9]*-[1-9][0-9]*$" },
+    "releaseSha256": { "$ref": "#/$defs/hash" },
+    "deliverySha256": { "$ref": "#/$defs/hash" },
+    "targetSha256": { "$ref": "#/$defs/hash" },
+    "iacCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "images": {
+      "type": "object", "maxProperties": 50,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" },
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["image", "digest", "archiveSha256"],
+        "properties": {
+          "image": { "type": "string", "pattern": "^[a-z0-9]{5,50}[.]azurecr[.]io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$" },
+          "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "archiveSha256": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "jobs": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" } }
+    },
+    "maintenanceSha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
+    "plan": {
+      "oneOf": [{ "type": "null" }, {
+        "type": "object", "additionalProperties": false, "required": ["purpose", "reviewSha256"],
+        "properties": { "purpose": { "enum": ["Maintenance", "Activation"] }, "reviewSha256": { "$ref": "#/$defs/hash" } }
+      }]
+    },
+    "activated": { "type": "boolean" },
+    "acceptance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["consentSha256", "status", "journeySucceeded", "cleanupStatus", "evidenceSha256"],
+      "properties": {
+        "consentSha256": { "$ref": "#/$defs/hash" },
+        "status": { "enum": ["Testing", "Cleaning", "Completed", "Failed"] },
+        "journeySucceeded": { "type": "boolean" },
+        "cleanupStatus": { "enum": ["Pending", "Destroyed", "Failed"] },
+        "evidenceSha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] }
+      }
+    },
+    "web": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "deploymentSha256", "archiveSha256", "overlaySha256", "hostingInputsSha256", "evidenceSha256"],
+      "properties": {
+        "status": { "enum": ["Publishing", "Published", "Verified"] },
+        "deploymentSha256": { "$ref": "#/$defs/hash" },
+        "archiveSha256": { "$ref": "#/$defs/hash" },
+        "overlaySha256": { "$ref": "#/$defs/hash" },
+        "hostingInputsSha256": { "$ref": "#/$defs/hash" },
+        "evidenceSha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "job": {
+      "type": "object", "additionalProperties": false,
+      "required": ["jobId", "attemptId", "templateSha256", "executionId", "status"],
+      "properties": {
+        "jobId": { "type": "string", "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[A-Za-z0-9._-]+/providers/Microsoft[.]App/jobs/[a-z0-9-]+$" },
+        "attemptId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+        "templateSha256": { "$ref": "#/$defs/hash" },
+        "executionId": { "type": ["string", "null"] },
+        "status": { "enum": ["Starting", "Running", "Succeeded", "Failed"] }
+      }
+    }
+  }
+}

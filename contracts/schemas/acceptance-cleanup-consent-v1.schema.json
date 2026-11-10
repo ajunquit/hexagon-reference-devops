@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "product",
+    "environment",
+    "instanceId",
+    "createdAt",
+    "bindingSha256",
+    "deliverySha256",
+    "deploymentSha256",
+    "roots"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/acceptance-cleanup-consent/v1"
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "environment": {
+      "enum": [
+        "dev",
+        "staging"
+      ]
+    },
+    "instanceId": {
+      "type": "string",
+      "pattern": "^run-[1-9][0-9]*-[1-9][0-9]*$"
+    },
+    "createdAt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "bindingSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "deliverySha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "deploymentSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "roots": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "resourceGroup",
+          "stateLineage",
+          "stateSerial",
+          "resources"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "hosting",
+              "messaging"
+            ]
+          },
+          "resourceGroup": {
+            "type": "string"
+          },
+          "stateLineage": {
+            "type": "string",
+            "pattern": "^[0-9a-f-]{36}$"
+          },
+          "stateSerial": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "type",
+                "address"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/[^ ]+$"
+                },
+                "type": {
+                  "type": "string",
+                  "pattern": "^azurerm_[a-z0-9_]+$"
+                },
+                "address": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

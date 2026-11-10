@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "product",
+    "environment",
+    "instanceId",
+    "releaseSha256",
+    "deliverySha256",
+    "consentSha256",
+    "observedAt",
+    "journeySucceeded",
+    "cleanupStatus",
+    "code"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/acceptance-evidence/v1"
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "environment": {
+      "enum": [
+        "dev",
+        "staging"
+      ]
+    },
+    "instanceId": {
+      "type": "string",
+      "pattern": "^run-[1-9][0-9]*-[1-9][0-9]*$"
+    },
+    "releaseSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "deliverySha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "consentSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "observedAt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "journeySucceeded": {
+      "type": "boolean"
+    },
+    "cleanupStatus": {
+      "enum": [
+        "Pending",
+        "Destroyed",
+        "Failed"
+      ]
+    },
+    "code": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "pattern": "^lifecycle[.][A-Za-z0-9.]+$"
+    }
+  }
+}

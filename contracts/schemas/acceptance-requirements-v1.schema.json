@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "product",
+    "component",
+    "profile",
+    "contract",
+    "$schema"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/acceptance-requirements/v1"
+    },
+    "kind": {
+      "const": "AcceptanceRequirements"
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "component": {
+      "enum": [
+        "backend",
+        "web"
+      ]
+    },
+    "profile": {
+      "const": "tenant-event-reaction/v1"
+    },
+    "contract": {
+      "type": "object"
+    },
+    "$schema": {
+      "const": "schemas/acceptance-requirements-v1.schema.json"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "component": {
+            "const": "backend"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "resource",
+              "receipt",
+              "seedOperation"
+            ],
+            "properties": {
+              "resource": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              },
+              "receipt": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              },
+              "seedOperation": {
+                "const": "isolated-tenants/v1"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "route",
+              "selectors"
+            ],
+            "properties": {
+              "route": {
+                "type": "string",
+                "pattern": "^/[a-z][a-z0-9/-]*/\\{tenant\\}/[a-z][a-z0-9/-]*$"
+              },
+              "selectors": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "signIn",
+                  "code",
+                  "name",
+                  "submit",
+                  "receipt"
+                ],
+                "properties": {
+                  "signIn": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  },
+                  "submit": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  },
+                  "receipt": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

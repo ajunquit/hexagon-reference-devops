@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "stage", "definitionSha256", "sourceSha256", "oidcPrefix", "repositoryId", "createdAt", "files"],
+  "properties": {
+    "apiVersion": { "const": "hexagon.ec/platform-bootstrap-review/v1" },
+    "stage": { "enum": ["State", "Access", "GitHub"] },
+    "definitionSha256": { "$ref": "#/$defs/hash" },
+    "sourceSha256": { "$ref": "#/$defs/hash" },
+    "oidcPrefix": { "type": "string", "pattern": "^repo:[A-Za-z0-9@/._-]+$" },
+    "repositoryId": { "type": "integer", "minimum": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "files": {
+      "type": "object", "minProperties": 1, "maxProperties": 20,
+      "propertyNames": { "enum": ["github.json", "main.tf", "providers.tf", "versions.tf", "variables.tf", "outputs.tf", ".terraform.lock.hcl", "inputs.tfvars.json", "backend.json", "review.tfplan", "review.plan.json"] },
+      "additionalProperties": { "$ref": "#/$defs/hash" }
+    }
+  },
+  "$defs": { "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+}

@@ -1,0 +1,24 @@
+module "hosting" {
+  source                      = "../../../modules/hosting/azure"
+  product                     = var.product
+  environment                 = var.environment
+  location                    = var.location
+  resource_group_name         = var.resource_group_name
+  name_prefix                 = var.name_prefix
+  registry_name               = var.registry_name
+  virtual_network_cidr        = var.virtual_network_cidr
+  application_subnet_cidr     = var.application_subnet_cidr
+  database_subnet_cidr        = var.database_subnet_cidr
+  database_name               = var.database_name
+  database_connection_name    = var.database_connection_name
+  database_sku                = var.database_sku
+  database_storage_mb         = var.database_storage_mb
+  auth                        = var.auth
+  workloads                   = var.workloads
+  migration_workload          = var.migration_workload
+  bootstrap_image             = var.bootstrap_image
+  application_rollout_enabled = var.application_rollout_enabled
+  maintenance_jobs_enabled    = var.maintenance_jobs_enabled
+  acceptance_fixture          = var.acceptance_fixture
+  tags                        = var.tags
+}

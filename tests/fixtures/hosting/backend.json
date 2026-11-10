@@ -1,0 +1,59 @@
+{
+  "$schema": "schemas/backend-hosting-requirements-v1.schema.json",
+  "apiVersion": "hexagon.ec/backend-hosting-requirements/v1",
+  "kind": "BackendHostingRequirements",
+  "product": "hexagon-example",
+  "component": "backend",
+  "database": {
+    "engine": "postgresql",
+    "minimumMajorVersion": 16,
+    "connectionName": "HexagonExampleDb"
+  },
+  "identity": {
+    "audience": "hexagon-example-api",
+    "apiScope": "hexagon_example_api.all"
+  },
+  "workloads": [
+    {
+      "id": "hexagon-example-api",
+      "kind": "api",
+      "project": "src/Hexagon.Template.Api/Hexagon.Template.Api.csproj",
+      "assembly": "Hexagon.Template.Api.dll",
+      "httpPorts": [
+        8080,
+        8081
+      ],
+      "healthPort": 8081
+    },
+    {
+      "id": "hexagon-example-worker",
+      "kind": "consumer",
+      "project": "src/Hexagon.Template.Worker/Hexagon.Template.Worker.csproj",
+      "assembly": "Hexagon.Template.Worker.dll",
+      "httpPorts": [
+        8081
+      ],
+      "healthPort": 8081
+    },
+    {
+      "id": "hexagon-example-sales-worker",
+      "kind": "consumer",
+      "project": "src/Modules/Sales/Hexagon.Template.Sales.Worker/Hexagon.Template.Sales.Worker.csproj",
+      "assembly": "Hexagon.Template.Sales.Worker.dll",
+      "httpPorts": [
+        8081
+      ],
+      "healthPort": 8081
+    }
+  ],
+  "health": {
+    "readinessPath": "/health/ready",
+    "livenessPath": "/health/alive"
+  },
+  "migrations": {
+    "workload": "hexagon-example-api",
+    "arguments": [
+      "--migrate-only"
+    ]
+  }
+}

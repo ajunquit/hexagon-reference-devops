@@ -1,0 +1,16 @@
+{
+  "apiVersion": "hexagon.ec/static-web-client/v1",
+  "buildId": "134664351bac2104cb9ec773226e5b3fc265675d",
+  "publishedAt": "2026-09-28T07:54:47.0425811Z",
+  "source": "https://aka.ms/swalocaldeploy",
+  "files": {
+    "linux-x64": {
+      "url": "https://swalocaldeployv2-bndtgugjgqc3dhdx.b01.azurefd.net/downloads/134664351bac2104cb9ec773226e5b3fc265675d/linux/StaticSitesClient",
+      "sha256": "638cde5d1a249355e72c891a372953a84d09f897fa47691d81bc45ca8fc615b9"
+    },
+    "win-x64": {
+      "url": "https://swalocaldeployv2-bndtgugjgqc3dhdx.b01.azurefd.net/downloads/134664351bac2104cb9ec773226e5b3fc265675d/windows/StaticSitesClient.exe",
+      "sha256": "c6e7332c35549990330299aaacd85e911d6770ea4b253b9da64a6ca8d9e3f02b"
+    }
+  }
+}

@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hexagon:platform-bootstrap:v1",
+  "title": "Hexagon platform bootstrap v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "product",
+    "automation",
+    "azure",
+    "state",
+    "environments"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "product": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "repository",
+        "branch"
+      ],
+      "properties": {
+        "provider": {
+          "const": "GitHubActions"
+        },
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*/hexagon-[a-z][a-z0-9-]*-devops$"
+        },
+        "branch": {
+          "const": "main"
+        }
+      }
+    },
+    "azure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "subscriptionId",
+        "location"
+      ],
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "subscriptionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "location": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]{2,30}$"
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resourceGroup",
+        "storageAccount",
+        "container"
+      ],
+      "properties": {
+        "resourceGroup": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,78}$"
+        },
+        "storageAccount": {
+          "type": "string",
+          "pattern": "^[a-z0-9]{3,24}$"
+        },
+        "container": {
+          "type": "string",
+          "maxLength": 55,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$"
+        }
+      }
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dev",
+        "staging",
+        "prod"
+      ],
+      "properties": {
+        "dev": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identityName",
+            "resourceGroups",
+            "reviewers"
+          ],
+          "properties": {
+            "identityName": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,78}$"
+            },
+            "resourceGroups": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,78}$"
+              }
+            },
+            "reviewers": {
+              "type": "array",
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+              }
+            }
+          }
+        },
+        "staging": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identityName",
+            "resourceGroups",
+            "reviewers"
+          ],
+          "properties": {
+            "identityName": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,78}$"
+            },
+            "resourceGroups": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,78}$"
+              }
+            },
+            "reviewers": {
+              "type": "array",
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+              }
+            }
+          }
+        },
+        "prod": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identityName",
+            "resourceGroups",
+            "reviewers"
+          ],
+          "properties": {
+            "identityName": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,78}$"
+            },
+            "resourceGroups": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{1,78}$"
+              }
+            },
+            "reviewers": {
+              "type": "array",
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+              },
+              "minItems": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

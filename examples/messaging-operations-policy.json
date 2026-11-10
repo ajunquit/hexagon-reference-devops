@@ -1,0 +1,31 @@
+{
+  "$schema": "../contracts/schemas/messaging-operations-policy-v1.schema.json",
+  "apiVersion": "hexagon.ec/messaging-operations-policy/v1",
+  "kind": "MessagingOperationsPolicy",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "provider": "aws-sns-sqs",
+  "notificationTargets": ["arn:aws:sns:us-east-1:000000000000:hexagon-example-dev-alerts"],
+  "operatorIdentities": {
+    "worker": "hexagon-example-dev-worker-operations",
+    "sales-worker": "hexagon-example-dev-sales-worker-operations"
+  },
+  "consumers": [
+    {
+      "id": "worker",
+      "backlogThreshold": 1000,
+      "deadLetterThreshold": null,
+      "oldestMessageAgeSeconds": 300,
+      "quarantineReviewHours": 0,
+      "replay": { "enabled": false, "maxBatchSize": 10, "delayMilliseconds": 500 }
+    },
+    {
+      "id": "sales-worker",
+      "backlogThreshold": 1000,
+      "deadLetterThreshold": 1,
+      "oldestMessageAgeSeconds": 300,
+      "quarantineReviewHours": 24,
+      "replay": { "enabled": true, "maxBatchSize": 10, "delayMilliseconds": 500 }
+    }
+  ]
+}

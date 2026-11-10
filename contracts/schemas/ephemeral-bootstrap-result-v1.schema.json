@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "status",
+    "applicationVerified",
+    "mode",
+    "details",
+    "code"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/ephemeral-bootstrap-result/v1"
+    },
+    "status": {
+      "enum": [
+        "Prepared",
+        "Applied",
+        "Configured",
+        "PreparedForDiagnostic",
+        "Blocked",
+        "Unverified"
+      ]
+    },
+    "applicationVerified": {
+      "const": false
+    },
+    "mode": {
+      "enum": [
+        "Prepare",
+        "Apply",
+        "GitHub",
+        "Verify"
+      ]
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reviewSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "definitionPath": {
+          "type": "string"
+        }
+      }
+    },
+    "code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^lifecycle[.][A-Za-z0-9.]+$"
+    }
+  }
+}

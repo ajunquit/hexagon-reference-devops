@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hexagon:messaging-requirements:v1",
+  "title": "Hexagon backend messaging requirements v1 test fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "product",
+    "component",
+    "provider",
+    "destinations",
+    "consumers"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "apiVersion": { "const": "hexagon.ec/messaging-requirements/v1" },
+    "kind": { "const": "BackendMessagingRequirements" },
+    "product": { "$ref": "#/$defs/workload" },
+    "component": { "const": "backend" },
+    "provider": {
+      "enum": ["azure-service-bus", "aws-sns-sqs", "rabbitmq"]
+    },
+    "destinations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/destination" }
+    },
+    "consumers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/consumer" }
+    }
+  },
+  "$defs": {
+    "logicalId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "workload": {
+      "type": "string",
+      "pattern": "^hexagon-[a-z][a-z0-9-]*$"
+    },
+    "eventType": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*IntegrationEvent$"
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "publisherWorkloads", "eventTypes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/logicalId" },
+        "publisherWorkloads": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/workload" }
+        },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/eventType" }
+        }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "workload", "destination", "routing"],
+      "properties": {
+        "id": { "$ref": "#/$defs/logicalId" },
+        "workload": { "$ref": "#/$defs/workload" },
+        "destination": { "$ref": "#/$defs/logicalId" },
+        "routing": { "$ref": "#/$defs/routing" }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["all", "include"] },
+        "eventTypes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/eventType" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "include" } } },
+          "then": { "required": ["eventTypes"] },
+          "else": { "not": { "required": ["eventTypes"] } }
+        }
+      ]
+    }
+  }
+}

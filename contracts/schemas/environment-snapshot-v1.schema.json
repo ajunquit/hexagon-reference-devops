@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "repository",
+    "commit",
+    "terraformVersion",
+    "files",
+    "roots"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/environment-snapshot/v1"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9-]+/hexagon-[a-z0-9-]+-devops$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "terraformVersion": {
+      "type": "string",
+      "pattern": "^1[.][0-9]+[.][0-9]+$"
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 2000,
+      "propertyNames": {
+        "pattern": "^(inputs/(hosting|messaging)[.]tfvars[.]json|terraform/[A-Za-z0-9_./-]+)$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/hash"
+      }
+    },
+    "roots": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 2,
+      "propertyNames": {
+        "enum": [
+          "hosting",
+          "messaging"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "directory",
+          "inputs",
+          "configurationSha256",
+          "inputsSha256"
+        ],
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "string"
+          },
+          "configurationSha256": {
+            "$ref": "#/$defs/hash"
+          },
+          "inputsSha256": {
+            "$ref": "#/$defs/hash"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
