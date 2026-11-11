@@ -60,3 +60,16 @@ run "rejects_shared_identity" {
   }
   expect_failures = [var.environments]
 }
+
+run "dev_only_creates_one_identity" {
+  command = plan
+  variables {
+    environments = {
+      dev = { identity_name = "id-dev", resource_groups = ["rg-hexagon-template-dev"], state_container = "tfstate-dev" }
+    }
+  }
+  assert {
+    condition     = length(azurerm_user_assigned_identity.deployment) == 1 && length(azurerm_role_assignment.state) == 1
+    error_message = "A dev-only product must not receive staging or prod access."
+  }
+}

@@ -268,15 +268,18 @@ try {
     }
     finally { Pop-Location }
 
+    $configuredProduct = (Get-Content -Raw -LiteralPath (Join-Path $rootDirectory '.config/product.json') | ConvertFrom-Json).product
+    $cliFixture = Join-Path $temporary 'cli-inventory.json'
+    [IO.File]::WriteAllText($cliFixture, $template.Replace('hexagon-template', $configuredProduct))
     $entry = Join-Path $rootDirectory 'scripts/Test-EnvironmentInventory.ps1'
-    $json = & pwsh -NoProfile -File $entry -Inventory (Join-Path $rootDirectory 'examples/environment-inventory.json') -Environment dev -InstanceId run-12345-1 -Operation Destroy
+    $json = & pwsh -NoProfile -File $entry -Inventory $cliFixture -Environment dev -InstanceId run-12345-1 -Operation Destroy
     $output = $json -join "`n" | ConvertFrom-Json
     Assert-True ($LASTEXITCODE -eq 0 -and ($output.order -join ',') -ceq 'messaging,hosting') 'CLI did not return a flat destruction order.'
-    $json = & pwsh -NoProfile -File $entry -Inventory (Join-Path $rootDirectory 'examples/environment-inventory.json') -Environment prod -InstanceId run-12345-1
+    $json = & pwsh -NoProfile -File $entry -Inventory $cliFixture -Environment prod -InstanceId run-12345-1
     Assert-True ($LASTEXITCODE -eq 1 -and ($json -join "`n" | ConvertFrom-Json).code -ceq 'lifecycle.selectionMismatch') 'CLI accepted another selected environment.'
     $newEntry = Join-Path $rootDirectory 'scripts/New-EnvironmentInventory.ps1'
     $output = Join-Path $rootDirectory "artifacts/lifecycle-whatif-$([guid]::NewGuid().ToString('N'))/inventory.json"
-    $json = & pwsh -NoProfile -File $newEntry -Definition (Join-Path $rootDirectory 'examples/environment-inventory.json') -Environment dev -InstanceId run-12345-1 -Output $output -WhatIf
+    $json = & pwsh -NoProfile -File $newEntry -Definition $cliFixture -Environment dev -InstanceId run-12345-1 -Output $output -WhatIf
     Assert-True ($LASTEXITCODE -eq 2 -and ($json -join "`n" | ConvertFrom-Json).status -ceq 'Unverified' -and -not (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName($output)))) 'WhatIf wrote an inventory or returned a successful creation.'
 }
 finally {

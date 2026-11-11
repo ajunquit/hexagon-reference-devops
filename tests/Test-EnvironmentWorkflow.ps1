@@ -197,6 +197,7 @@ try {
         $destination = Join-Path $source $relative; [IO.Directory]::CreateDirectory($destination) | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $repository $relative) -File -Force | Copy-Item -Destination $destination
     }
+    Write-Json (Join-Path $source '.config/product.json') @{ product = $definition.inventory.product }
     $profileDirectory = Join-Path $source '.config/environments/dev/run-12345-1'
     [IO.Directory]::CreateDirectory($profileDirectory) | Out-Null
     $profilePath = Join-Path $profileDirectory 'definition.json'; Write-Json $profilePath $definition

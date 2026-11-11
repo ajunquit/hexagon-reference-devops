@@ -49,3 +49,19 @@ run "protects_remote_state_with_identity_and_recovery" {
     error_message = "Each environment must use an independent state key."
   }
 }
+
+run "dev_only_state" {
+  command = plan
+  variables {
+    product                = "hexagon-example"
+    resource_group_name    = "rg-hexagon-example-tfstate"
+    location               = "eastus2"
+    storage_account_name   = "sthexagonexample0001"
+    environment_groups     = { rg-example-dev = "dev" }
+    environment_containers = { dev = "tfstate-dev" }
+  }
+  assert {
+    condition     = length(azurerm_storage_container.environment) == 1 && length(azurerm_resource_group.environment) == 1 && !contains(keys(output.state_keys), "staging") && !contains(keys(output.state_keys), "prod")
+    error_message = "A dev-only product must not create or advertise staging and prod state."
+  }
+}

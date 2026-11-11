@@ -12,6 +12,10 @@ on:
         description: SHA-256 of the reviewed YAML bytes
         required: true
         type: string
+      environments_json:
+        description: JSON array of environments declared in the reviewed YAML
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -29,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [dev, staging, prod]
+        environment: ${{ fromJSON(inputs.environments_json) }}
     environment: ${{ matrix.environment }}
     permissions:
       contents: read

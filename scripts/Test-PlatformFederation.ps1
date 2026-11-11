@@ -13,6 +13,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1') -Force
 $parsed = Read-PlatformBootstrapDefinition $Definition
 $settings = $parsed.definition
+if (-not $settings.environments.ContainsKey($Environment)) { throw 'Federation diagnostic environment is not configured.' }
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or
     $env:GITHUB_REF -cne 'refs/heads/main' -or $env:GITHUB_REPOSITORY -ine $settings.automation.repository) { throw 'Federation diagnostic requires the trusted main workflow.' }
 $accountText = & az account show --output json --only-show-errors 2>$null
@@ -40,7 +41,7 @@ $storageToken = Get-DiagnosticToken 'https://storage.azure.com/'
 $accountUrl = "https://$($settings.state.storageAccount).blob.core.windows.net"
 Assert-DiagnosticResponse "$accountUrl/$($settings.state.container)-$Environment`?restype=container&comp=list&maxresults=1" $storageToken 200 -Storage
 Assert-DiagnosticResponse "$accountUrl/$($settings.state.container)?restype=container&comp=list&maxresults=1" $storageToken 403 -Storage
-foreach ($other in @('dev', 'staging', 'prod') | Where-Object { $_ -cne $Environment }) {
+foreach ($other in @(Get-BootstrapEnvironments $settings | Where-Object { $_ -cne $Environment })) {
     Assert-DiagnosticResponse "$accountUrl/$($settings.state.container)-$other`?restype=container&comp=list&maxresults=1" $storageToken 403 -Storage
     foreach ($group in $settings.environments[$other].resourceGroups) {
         Assert-DiagnosticResponse "https://management.azure.com/subscriptions/$($settings.azure.subscriptionId)/resourcegroups/$group`?api-version=2024-03-01" $armToken 403

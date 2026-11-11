@@ -12,6 +12,9 @@ foreach ($name in @('GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REF', 'GITHUB
     $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $global:hexagonFederationProbeStatus = 403
+$global:hexagonFederationProduct = (Get-Content -Raw (Join-Path $root '.config/product.json') | ConvertFrom-Json).product
+$fixture = Join-Path ([IO.Path]::GetTempPath()) "hexagon-federation-$([guid]::NewGuid().ToString('N')).yaml"
+[IO.File]::WriteAllText($fixture, (Get-Content -Raw (Join-Path $root 'examples/platform-bootstrap.yaml')).Replace('hexagon-template', $global:hexagonFederationProduct))
 $global:hexagonFederationProbeCalls = [Collections.Generic.List[string]]::new()
 function global:az {
     $global:LASTEXITCODE = 0
@@ -26,17 +29,17 @@ function global:Invoke-WebRequest {
     param($Uri, $Headers, $Method, [switch] $SkipHttpErrorCheck, $TimeoutSec)
     if ($Method -cne 'Get' -or -not $SkipHttpErrorCheck -or $TimeoutSec -ne 30 -or $Headers.Authorization -cne 'Bearer never-log-this-token') { throw 'Unexpected diagnostic HTTP request.' }
     $global:hexagonFederationProbeCalls.Add($Uri)
-    $own = $Uri -match '^https://management[.]azure[.]com/.*/resourcegroups/rg-hexagon-template-dev(?:-|[?])' -or $Uri -match '^https://sthexagontemplatestate[.]blob[.]core[.]windows[.]net/tfstate-dev[?]'
+    $own = $Uri -match ('^https://management[.]azure[.]com/.*/resourcegroups/rg-' + [regex]::Escape($global:hexagonFederationProduct) + '-dev(?:-|[?])') -or $Uri -match '^https://sthexagontemplatestate[.]blob[.]core[.]windows[.]net/tfstate-dev[?]'
     return @{ StatusCode = $(if ($own) { 200 } else { $global:hexagonFederationProbeStatus }) }
 }
 try {
     [Environment]::SetEnvironmentVariable('GITHUB_ACTIONS', 'true', 'Process')
     [Environment]::SetEnvironmentVariable('GITHUB_EVENT_NAME', 'workflow_dispatch', 'Process')
     [Environment]::SetEnvironmentVariable('GITHUB_REF', 'refs/heads/main', 'Process')
-    [Environment]::SetEnvironmentVariable('GITHUB_REPOSITORY', 'example-owner/hexagon-template-devops', 'Process')
+    [Environment]::SetEnvironmentVariable('GITHUB_REPOSITORY', "example-owner/$($global:hexagonFederationProduct)-devops", 'Process')
     [Environment]::SetEnvironmentVariable('AZURE_CLIENT_ID', 'dev-client', 'Process')
     $command = Join-Path $root 'scripts/Test-PlatformFederation.ps1'
-    $definition = Join-Path $root 'examples/platform-bootstrap.yaml'
+    $definition = $fixture
     $json = & $command -Definition $definition -Environment dev
     if (($json | ConvertFrom-Json).status -cne 'Verified' -or $json -match 'never-log-this-token' -or $global:hexagonFederationProbeCalls.Count -ne 10) { throw 'Diagnostic did not prove the expected isolation checks or disclosed a token.' }
     foreach ($status in @(404, 200, 401, 500)) {
@@ -56,6 +59,7 @@ try {
 finally {
     foreach ($name in $previous.Keys) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
     Remove-Item Function:az, Function:Invoke-WebRequest
-    Remove-Variable -Name hexagonFederationProbeStatus, hexagonFederationProbeCalls -Scope Global
+    Remove-Variable -Name hexagonFederationProbeStatus, hexagonFederationProbeCalls, hexagonFederationProduct -Scope Global
+    Remove-Item -LiteralPath $fixture -Force
 }
 Write-Host 'Federation protocol tests passed: exact 403, wrong status codes, main boundary and token redaction.'

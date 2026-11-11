@@ -10,13 +10,10 @@ output "backend_configuration" {
 
 output "state_keys" {
   description = "Independent state keys for bootstrap and each product environment."
-  value = {
+  value = merge({
     bootstrap = "${var.product}/bootstrap/state.tfstate"
     access    = "${var.product}/bootstrap/access.tfstate"
-    dev       = "${var.product}/dev/terraform.tfstate"
-    staging   = "${var.product}/staging/terraform.tfstate"
-    prod      = "${var.product}/prod/terraform.tfstate"
-  }
+  }, { for environment in keys(var.environment_containers) : environment => "${var.product}/${environment}/terraform.tfstate" })
 }
 
 output "environment_backend_configuration" {

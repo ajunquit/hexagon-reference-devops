@@ -13,9 +13,10 @@ variable "environments" {
   }))
   validation {
     condition = (
-      toset(keys(var.environments)) == toset(["dev", "staging", "prod"]) &&
-      length(distinct([for value in values(var.environments) : lower(value.identity_name)])) == 3 &&
-      length(distinct([for value in values(var.environments) : lower(value.state_container)])) == 3 &&
+      contains(keys(var.environments), "dev") &&
+      alltrue([for environment in keys(var.environments) : contains(["dev", "staging", "prod"], environment)]) &&
+      length(distinct([for value in values(var.environments) : lower(value.identity_name)])) == length(var.environments) &&
+      length(distinct([for value in values(var.environments) : lower(value.state_container)])) == length(var.environments) &&
       alltrue([for environment, value in var.environments :
         endswith(value.state_container, "-${environment}") &&
         alltrue([for group in value.resource_groups : startswith(group, "rg-${var.product}-${environment}") && group != var.resource_group_name])
@@ -23,6 +24,6 @@ variable "environments" {
       length(flatten([for value in values(var.environments) : tolist(value.resource_groups)])) ==
       length(distinct(flatten([for value in values(var.environments) : tolist(value.resource_groups)])))
     )
-    error_message = "All three environments require separate identities, state containers and resource groups."
+    error_message = "Each selected environment requires a separate identity, state container and resource groups; dev is required."
   }
 }

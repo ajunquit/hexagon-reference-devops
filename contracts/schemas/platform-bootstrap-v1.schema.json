@@ -92,9 +92,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "dev",
-        "staging",
-        "prod"
+        "dev"
       ],
       "properties": {
         "dev": {

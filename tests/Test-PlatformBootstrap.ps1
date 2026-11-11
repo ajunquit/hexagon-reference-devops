@@ -57,7 +57,7 @@ $read = {
 }
 
 try {
-    $parsed = Read-PlatformBootstrapDefinition -Path $example
+    $parsed = Read-PlatformBootstrapDocument -Path $example
     $offline = New-PlatformBootstrapPlan -Parsed $parsed
     Assert-True ($offline.status -ceq 'Unverified' -and -not $offline.readyToApply) 'Offline plans must not claim readiness.'
     Assert-True ($offline.operations.Count -eq 12) 'Missing bootstrap stages.'
@@ -69,6 +69,11 @@ try {
     $offlineJson = ConvertTo-PlatformBootstrapJson $offline
     Assert-True ($offlineJson | Test-Json -SchemaFile (Join-Path $root 'contracts/schemas/platform-bootstrap-result-v1.schema.json')) 'Result schema rejected an offline plan.'
     Assert-True ($offlineJson -ceq (ConvertTo-PlatformBootstrapJson (New-PlatformBootstrapPlan -Parsed $parsed))) 'Plan serialization is not deterministic.'
+    $devOnly = Read-PlatformBootstrapDocument -Path (Write-Yaml ($original -replace '(?ms)^  staging:\r?\n.*\z', ''))
+    $devPlan = New-PlatformBootstrapPlan -Parsed $devOnly
+    Assert-True ((@(Get-BootstrapEnvironments $devOnly.definition) -join ',') -ceq 'dev') 'A dev-only definition selected other environments.'
+    Assert-True (@($devPlan.operations | Where-Object { $_.id -match '(staging|prod)' }).Count -eq 0 -and
+        (@($devPlan.operations | Where-Object id -CEQ 'workflow.diagnostic')[0].dependsOn -join ',') -ceq 'github.variables.dev') 'Dev-only plan still requires staging or prod.'
 
     foreach ($invalid in @(
         $original.Replace('schemaVersion: 1', 'schemaVersion: 1' + "`nclientSecret: never-print-this-value"),
@@ -83,18 +88,23 @@ try {
         $original.Replace('release-reviewer', 'release-reviewer, "$(arbitrary-command)"')
     )) {
         $path = Write-Yaml $invalid
-        Assert-Rejected { Read-PlatformBootstrapDefinition -Path $path } 'bootstrap.definitionInvalid'
+        Assert-Rejected { Read-PlatformBootstrapDocument -Path $path } 'bootstrap.definitionInvalid'
     }
-    $path = Write-Yaml ($original.Replace('hexagon-template', 'hexagon-other'))
+    $configuredProduct = (Get-Content -Raw (Join-Path $root '.config/product.json') | ConvertFrom-Json).product
+    $foreignProduct = if ($configuredProduct -cne 'hexagon-context-check') { 'hexagon-context-check' } else { 'hexagon-context-other' }
+    $path = Write-Yaml ($original.Replace('hexagon-template', $foreignProduct))
+    Read-PlatformBootstrapDocument -Path $path | Out-Null
     Assert-Rejected { Read-PlatformBootstrapDefinition -Path $path } 'bootstrap.productMismatch'
+    $path = Write-Yaml ($original.Replace('hexagon-template', $configuredProduct))
+    Assert-True ((Read-PlatformBootstrapDefinition -Path $path).definition.product -ceq $configuredProduct) 'Runtime must validate the configured product independently from the template fixture.'
     $path = Write-Yaml ($original.Replace('id-hexagon-template-staging-deploy', 'id-hexagon-template-dev-deploy'))
-    Assert-Rejected { Read-PlatformBootstrapDefinition -Path $path } 'bootstrap.identityShared'
+    Assert-Rejected { Read-PlatformBootstrapDocument -Path $path } 'bootstrap.identityShared'
     $path = Write-Yaml ($original.Replace('rg-hexagon-template-staging-messaging', 'rg-hexagon-template-dev-messaging'))
-    Assert-Rejected { Read-PlatformBootstrapDefinition -Path $path } 'bootstrap.resourceGroupShared'
+    Assert-Rejected { Read-PlatformBootstrapDocument -Path $path } 'bootstrap.resourceGroupShared'
     $path = Write-Yaml ($original.Replace('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000000'))
-    Assert-Rejected { Read-PlatformBootstrapDefinition -Path $path } 'bootstrap.targetInvalid'
+    Assert-Rejected { Read-PlatformBootstrapDocument -Path $path } 'bootstrap.targetInvalid'
     $path = Write-Yaml ('a' * 65537)
-    Assert-Rejected { Read-PlatformBootstrapDefinition -Path $path } 'bootstrap.definitionInvalid'
+    Assert-Rejected { Read-PlatformBootstrapDocument -Path $path } 'bootstrap.definitionInvalid'
 
     Reset-Responses
     $observation = Get-PlatformBootstrapObservation -Definition $parsed.definition -Read $read
@@ -170,18 +180,19 @@ try {
     $script:assertions++
 
     $entry = Join-Path $root 'scripts/Invoke-PlatformBootstrap.ps1'
-    $json = & pwsh -NoProfile -File $entry -Definition $example -Mode Validate
+    $runtimeExample = Write-Yaml ($original.Replace('hexagon-template', $configuredProduct))
+    $json = & pwsh -NoProfile -File $entry -Definition $runtimeExample -Mode Validate
     Assert-True ($LASTEXITCODE -eq 0 -and ($json -join "`n" | ConvertFrom-Json).status -ceq 'Validated') 'Validate CLI failed.'
     $output = Join-Path $temporaryRoot 'plan.json'
-    $json = & pwsh -NoProfile -File $entry -Definition $example -Mode Plan -Offline -Output $output -WhatIf
+    $json = & pwsh -NoProfile -File $entry -Definition $runtimeExample -Mode Plan -Offline -Output $output -WhatIf
     Assert-True ($LASTEXITCODE -eq 2 -and -not (Test-Path -LiteralPath $output)) 'WhatIf must not write the requested output.'
     Assert-True (($json -join "`n" | ConvertFrom-Json).status -ceq 'Unverified') 'WhatIf output must remain machine-readable JSON.'
-    $json = & pwsh -NoProfile -File $entry -Definition $example -Mode Plan -Offline -Output $output
+    $json = & pwsh -NoProfile -File $entry -Definition $runtimeExample -Mode Plan -Offline -Output $output
     Assert-True ($LASTEXITCODE -eq 2 -and (Test-Path -LiteralPath $output)) 'Offline plan export failed.'
     $before = (Get-FileHash -LiteralPath $output).Hash
-    $overwriteError = & pwsh -NoProfile -File $entry -Definition $example -Mode Plan -Offline -Output $output 2>&1
+    $overwriteError = & pwsh -NoProfile -File $entry -Definition $runtimeExample -Mode Plan -Offline -Output $output 2>&1
     Assert-True ($LASTEXITCODE -ne 0 -and (Get-FileHash -LiteralPath $output).Hash -ceq $before) 'Plan export must not overwrite an existing result.'
-    $unsupported = & pwsh -NoProfile -File $entry -Definition $example -Mode Apply 2>&1
+    $unsupported = & pwsh -NoProfile -File $entry -Definition $runtimeExample -Mode Apply 2>&1
     Assert-True ($LASTEXITCODE -ne 0) 'Apply without a workspace and reviewed plan must fail.'
     $path = Write-Yaml ($original + "`nclientSecret: never-print-this-value")
     $json = & pwsh -NoProfile -File $entry -Definition $path -Mode Validate
