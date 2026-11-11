@@ -1,12 +1,13 @@
-# hexagon-template-devops — instrucciones para agentes de IA
+# hexagon-reference-devops — instrucciones para agentes de IA
 
-Este repositorio es la plantilla de infraestructura, despliegue y operación de un producto
-Hexagon. Cada producto genera una instancia independiente, por ejemplo `hexagon-hr-devops`.
+Este repositorio es la instancia DevOps del producto aislado `hexagon-reference`. Administra su
+infraestructura, despliegue y operación en la suscripción autorizada; la plantilla reutilizable
+vive en `hexagon-template-devops`.
 
 ## Reglas
 
-1. La plantilla solo contiene mecanismos reutilizables. No lleva nombres, cuentas, suscripciones,
-   dominios, secretos ni reglas de un producto real.
+1. Solo se gestionan recursos de `hexagon-reference` y el ambiente `dev` declarado. Los IDs Azure
+   permitidos están en `.config/platform-bootstrap.yaml`; secretos y estado nunca se versionan.
 2. Un repositorio generado administra un solo producto. Todos los productos empiezan con backend
    de monolito modular y conservan el mismo repositorio DevOps si más adelante extraen servicios.
    No existen variantes `hexagon-template-devops-ml` o `hexagon-template-devops-ms`. La
@@ -23,13 +24,14 @@ Hexagon. Cada producto genera una instancia independiente, por ejemplo `hexagon-
    oculte capacidades o semánticas distintas de los proveedores.
 7. Los secretos se guardan en el gestor del proveedor o se entregan por identidad. Nunca aparecen
    en descriptores, variables versionadas, planes, ejemplos, logs o descripciones de PR.
-8. `dev`, `staging` y `prod` tienen estados y políticas independientes. Una promoción cambia el
-   descriptor a otro commit inmutable; no recompila la aplicación ni toma una rama mutable.
+8. Solo `dev` está declarado para esta referencia. Sus recursos de aplicación, Auth y mensajería
+   tienen grupos separados; el estado de Terraform vive en otro grupo. Un ambiente futuro requiere
+   una definición y autorización propias antes de crear recursos.
 9. Código, scripts, variables y comentarios en inglés. README, CHANGELOG, `docs/` y ADR en español.
 10. Los scripts son deterministas, idempotentes cuando realizan cambios y admiten `-WhatIf` cuando
     escriben. Deben validar precondiciones antes de modificar recursos externos.
-11. No se añaden workflows, despliegues ni recursos cloud antes de su fase autorizada. La fase 3
-    solo cubre estructura, contratos, validación y elección de herramienta.
+11. Cada cambio de infraestructura requiere destino verificado, plan revisado y evidencia de Apply.
+    Un ambiente adicional exige una definición y autorización explícitas antes de crearlo.
 12. Una rama por cambio desde `main`; commits y PR en español. Todo cambio funcional actualiza
     `CHANGELOG.md` y su documentación.
 13. Operación según `docs/operacion-mensajeria.md`: política por consumidor, identidad distinta de

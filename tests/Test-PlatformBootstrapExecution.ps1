@@ -10,7 +10,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Import-Module (Join-Path $root 'scripts/PlatformBootstrap.psm1') -Force
 Import-Module (Join-Path $root 'scripts/PlatformBootstrap.Execution.psm1') -Force
 $module = Get-Module PlatformBootstrap.Execution
-$parsed = Read-PlatformBootstrapDefinition (Join-Path $root 'examples/platform-bootstrap.yaml')
+$parsed = Read-PlatformBootstrapDocument (Join-Path $root 'examples/platform-bootstrap.yaml')
 $observation = @{
     oidcPrefix = 'repo:example-owner@123/hexagon-template-devops@456'
     repository = @{ id = 456 }; environments = @()
@@ -36,6 +36,14 @@ try {
     Assert-True ($variables.environment_groups.Count -eq 6 -and $variables.subscription_id -ceq $parsed.definition.azure.subscriptionId) 'Terraform target or group ownership is missing.'
     $access = Get-BootstrapTerraformVariables $parsed.definition $observation Access
     Assert-True ($access.environments.dev.state_container -ceq 'tfstate-dev' -and $access.oidc_prefix -ceq $observation.oidcPrefix) 'Access inputs lost the observed subject or container boundary.'
+    $devOnlyPath = Join-Path $workspace 'dev-only.yaml'
+    [IO.File]::WriteAllText($devOnlyPath, ((Get-Content -Raw -LiteralPath (Join-Path $root 'examples/platform-bootstrap.yaml')) -replace '(?ms)^  staging:\r?\n.*\z', ''))
+    $devOnly = Read-PlatformBootstrapDocument $devOnlyPath
+    $devState = Get-BootstrapTerraformVariables $devOnly.definition $observation State
+    $devAccess = Get-BootstrapTerraformVariables $devOnly.definition $observation Access
+    Assert-True ($devState.environment_groups.Count -eq 2 -and $devState.environment_containers.Count -eq 1 -and $devAccess.environments.Count -eq 1) 'Dev-only Terraform inputs include other environments.'
+    $devDesired = Get-BootstrapGithubDesired $devOnly.definition @{ dev = @{ client_id = 'client-dev' } }
+    Assert-True ($devDesired.Count -eq 1 -and $devDesired.dev.variables.AZURE_CLIENT_ID -ceq 'client-dev') 'Dev-only GitHub settings include other environments.'
 
     & $module {
         $script:terraformCalls = [Collections.Generic.List[object]]::new()
@@ -56,7 +64,9 @@ try {
                 'state' {
                     if ($Arguments[2] -ceq 'push') {
                         if ($script:failPush) { throw 'bootstrap.command.terraform' }
-                        $script:remoteState = Get-Content -Raw -LiteralPath $Arguments[-1]
+                        $pushed = Get-Content -Raw -LiteralPath $Arguments[-1] | ConvertFrom-Json -AsHashtable
+                        $pushed.serial++
+                        $script:remoteState = ConvertTo-PlatformBootstrapJson $pushed
                     }
                     elseif ($Arguments[2] -ceq 'pull') { return $script:remoteState }
                     return ''
@@ -100,10 +110,10 @@ try {
     & $module { $script:failPush = $true }
     Assert-Rejected { Move-BootstrapState $parsed $workspace } 'bootstrap.command.terraform'
     Assert-True (Test-Path -LiteralPath $localState) 'Failed migration removed the only local state.'
-    & $module { $script:failPush = $false; $script:remoteState = '{"lineage":"foreign-lineage","serial":1,"resources":[]}' }
+    & $module { $script:failPush = $false; $script:remoteState = '{"lineage":"foreign-lineage","serial":2,"resources":[{"type":"azurerm_resource_group","name":"foreign"}]}' }
     Assert-Rejected { Move-BootstrapState $parsed $workspace } 'bootstrap.migrationMismatch'
     Assert-True (Test-Path -LiteralPath $localState) 'Foreign remote lineage destroyed the local backup.'
-    & $module { $script:remoteState = $null }
+    & $module { $script:remoteState = '{"lineage":"init-lineage","serial":1,"resources":[],"outputs":{}}' }
     Move-BootstrapState $parsed $workspace
     Assert-True (-not (Test-Path -LiteralPath $localState) -and (Test-Path -LiteralPath (Join-Path $workspace 'state/remote.json'))) 'Verified migration did not remove its local state.'
     $pushes = & $module { @($script:terraformCalls | Where-Object { $_[1] -ceq 'state' -and $_[2] -ceq 'push' }).Count }
@@ -121,7 +131,7 @@ try {
     Assert-Rejected { Assert-BootstrapFederation @($credential, $credential) $credential.subject } 'bootstrap.federationDrift'
     $subscription = $parsed.definition.azure.subscriptionId
     $roles = @(
-        @{ scope = '/container/dev'; roleDefinitionId = '/roles/ba92f5b4-2d11-453d-a403-e96b0029c9fe'; condition = $null },
+        @{ scope = '/container/dev'; roleDefinitionId = '/roles/ba92f5b4-2d11-453d-a403-e96b0029c9fe' },
         @{ scope = "/subscriptions/$subscription/resourceGroups/rg-dev"; roleDefinitionId = '/roles/b24988ac-6180-42a0-ab88-20f7382dd24c'; condition = $null },
         @{ scope = "/subscriptions/$subscription/resourceGroups/rg-dev"; roleDefinitionId = '/roles/f58310d9-a9f6-439a-9e8d-f62e7b41a168'; condition = 'restricted'; conditionVersion = '2.0' }
     )
@@ -217,6 +227,9 @@ try {
     Assert-Rejected { Assert-BootstrapDiagnostic $run $jobs $parsed 'other-commit' 99 } 'bootstrap.diagnosticRunInvalid'
 
     # Exercise the public runner with real read-only preflight transports and WhatIf.
+    $global:hexagonBootstrapTestProduct = (Get-Content -Raw (Join-Path $root '.config/product.json') | ConvertFrom-Json).product
+    $runtimeDefinition = Join-Path $workspace 'runtime-definition.yaml'
+    [IO.File]::WriteAllText($runtimeDefinition, (Get-Content -Raw (Join-Path $root 'examples/platform-bootstrap.yaml')).Replace('hexagon-template', $global:hexagonBootstrapTestProduct))
     $global:hexagonBootstrapTestWrongTarget = $false
     $global:hexagonBootstrapTestApplyCalls = 0
     function global:az {
@@ -246,28 +259,28 @@ try {
             '*/environments*' { '{"total_count":0,"environments":[]}' }
             '*/actions/permissions/workflow' { '{"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}' }
             '*/actions/permissions' { '{"enabled":true}' }
-            '*/actions/oidc/customization/sub' { '{"use_default":true,"sub_claim_prefix":"repo:example-owner@123/hexagon-template-devops@456"}' }
-            default { '{"full_name":"example-owner/hexagon-template-devops","default_branch":"main","archived":false,"disabled":false,"permissions":{"admin":true},"owner":{"id":123},"id":456}' }
+            '*/actions/oidc/customization/sub' { '{"use_default":true,"sub_claim_prefix":"repo:example-owner@123/hexagon-template-devops@456"}'.Replace('hexagon-template', $global:hexagonBootstrapTestProduct) }
+            default { '{"full_name":"example-owner/hexagon-template-devops","default_branch":"main","archived":false,"disabled":false,"permissions":{"admin":true},"owner":{"id":123},"id":456}'.Replace('hexagon-template', $global:hexagonBootstrapTestProduct) }
         }
     }
     try {
         $whatIfWorkspace = Join-Path $root "artifacts/bootstrap-whatif-$([guid]::NewGuid().ToString('N'))"
-        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Prepare -Stage State -Workspace $whatIfWorkspace -WhatIf
+        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Prepare -Stage State -Workspace $whatIfWorkspace -WhatIf
         $model = $result -join "`n" | ConvertFrom-Json
         Assert-True ($model.status -ceq 'Unverified' -and -not $model.readyToApply -and -not (Test-Path -LiteralPath $whatIfWorkspace)) 'WhatIf created execution files or claimed readiness.'
         $global:hexagonBootstrapTestWrongTarget = $true
-        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Prepare -Stage State -Workspace $whatIfWorkspace
+        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Prepare -Stage State -Workspace $whatIfWorkspace
         $model = $result -join "`n" | ConvertFrom-Json
         Assert-True ($model.status -ceq 'Blocked' -and $model.checks[0].code -ceq 'bootstrap.targetMismatch' -and -not (Test-Path -LiteralPath $whatIfWorkspace)) 'Wrong target was not rejected before the first filesystem write.'
         $global:hexagonBootstrapTestWrongTarget = $false
-        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Prepare -Stage State -Workspace $workspace
+        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Prepare -Stage State -Workspace $workspace
         Assert-True (($result -join "`n" | ConvertFrom-Json).checks[0].code -ceq 'bootstrap.workspaceOutsideArtifacts') 'An execution workspace outside artifacts was accepted.'
         if (-not $IsWindows) {
             $wrongCase = Join-Path $root "ARTIFACTS/bootstrap-invalid-$([guid]::NewGuid().ToString('N'))"
-            $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Prepare -Stage State -Workspace $wrongCase
+            $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Prepare -Stage State -Workspace $wrongCase
             Assert-True (($result -join "`n" | ConvertFrom-Json).checks[0].code -ceq 'bootstrap.workspaceOutsideArtifacts' -and -not (Test-Path -LiteralPath $wrongCase)) 'Unix accepted a differently cased directory outside the ignored artifacts path.'
         }
-        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Prepare -Stage State -Workspace $whatIfWorkspace
+        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Prepare -Stage State -Workspace $whatIfWorkspace
         $model = $result -join "`n" | ConvertFrom-Json
         Assert-True ($model.status -ceq 'Prepared' -and $model.readyToApply -and -not $model.platformVerified) 'CLI Prepare did not create a stage-scoped review.'
         $hash = $model.details.reviewSha256
@@ -276,20 +289,20 @@ try {
             [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($cacheLink)) | Out-Null
             New-Item -ItemType SymbolicLink -Path $cacheLink -Target $workspace | Out-Null
         }
-        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Apply -Stage State -Workspace $whatIfWorkspace -ReviewSha256 ('0' * 64)
+        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Apply -Stage State -Workspace $whatIfWorkspace -ReviewSha256 ('0' * 64)
         Assert-True (($result -join "`n" | ConvertFrom-Json).status -ceq 'Blocked' -and $global:hexagonBootstrapTestApplyCalls -eq 0) 'An invalid CLI review reached apply.'
-        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Apply -Stage State -Workspace $whatIfWorkspace -ReviewSha256 $hash
+        $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Apply -Stage State -Workspace $whatIfWorkspace -ReviewSha256 $hash
         $model = $result -join "`n" | ConvertFrom-Json
         Assert-True ($model.status -ceq 'Applied' -and -not $model.platformVerified -and $global:hexagonBootstrapTestApplyCalls -eq 1) 'CLI Apply failed or claimed platform verification.'
         if (-not $IsWindows) {
             $unsafeLink = Join-Path $whatIfWorkspace 'state/linked-configuration'
             New-Item -ItemType SymbolicLink -Path $unsafeLink -Target $workspace | Out-Null
-            $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition (Join-Path $root 'examples/platform-bootstrap.yaml') -Mode Prepare -Stage State -Workspace $whatIfWorkspace
+            $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $runtimeDefinition -Mode Prepare -Stage State -Workspace $whatIfWorkspace
             Assert-True (($result -join "`n" | ConvertFrom-Json).checks[0].code -ceq 'bootstrap.workspaceLink') 'A configuration link escaped the workspace boundary.'
             Remove-Item -LiteralPath $unsafeLink
         }
         $changed = Join-Path $workspace 'changed-storage.yaml'
-        [IO.File]::WriteAllText($changed, (Get-Content -Raw -LiteralPath (Join-Path $root 'examples/platform-bootstrap.yaml')).Replace('sthexagontemplatestate', 'stchangedstorage'))
+        [IO.File]::WriteAllText($changed, (Get-Content -Raw -LiteralPath $runtimeDefinition).Replace('sthexagontemplatestate', 'stchangedstorage'))
         $result = & (Join-Path $root 'scripts/Invoke-PlatformBootstrapStage.ps1') -Definition $changed -Mode Prepare -Stage State -Workspace $whatIfWorkspace
         Assert-True (($result -join "`n" | ConvertFrom-Json).checks[0].code -ceq 'bootstrap.workspaceTargetChanged') 'A workspace silently changed its storage target.'
     }

@@ -21,7 +21,11 @@ function ConvertTo-PlatformBootstrapJson {
     return (ConvertTo-CanonicalValue $Value) | ConvertTo-Json -Depth 32
 }
 
-function Read-PlatformBootstrapDefinition {
+function Get-BootstrapEnvironments([hashtable] $Definition) {
+    return @(@('dev', 'staging', 'prod') | Where-Object { $Definition.environments.ContainsKey($_) })
+}
+
+function Read-PlatformBootstrapDocument {
     param([Parameter(Mandatory)][string] $Path)
     $root = Split-Path -Parent $PSScriptRoot
     $project = Join-Path $root 'operations/Hexagon.Platform.Definition/Hexagon.Platform.Definition.csproj'
@@ -45,8 +49,8 @@ function Read-PlatformBootstrapDefinition {
         throw 'bootstrap.definitionInvalid'
     }
     $definition = $parsed.definition
-    $product = (Get-Content -Raw -LiteralPath (Join-Path $root '.config/product.json') | ConvertFrom-Json).product
-    if ($definition.product -cne $product -or ($definition.automation.repository -split '/')[1] -cne "$product-devops") {
+    $product = $definition.product
+    if (($definition.automation.repository -split '/')[1] -cne "$product-devops") {
         throw 'bootstrap.productMismatch'
     }
     foreach ($key in @('tenantId', 'subscriptionId')) {
@@ -55,7 +59,7 @@ function Read-PlatformBootstrapDefinition {
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $groups = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     [void] $groups.Add($definition.state.resourceGroup)
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $definition)) {
         $settings = $definition.environments[$environment]
         if (-not $names.Add($settings.identityName)) { throw 'bootstrap.identityShared' }
         $reviewers = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -69,6 +73,15 @@ function Read-PlatformBootstrapDefinition {
         }
     }
     if ($definition.state.container -match '--' -or $definition.state.container.Length -gt 55) { throw 'bootstrap.definitionInvalid' }
+    return $parsed
+}
+
+function Read-PlatformBootstrapDefinition {
+    param([Parameter(Mandatory)][string] $Path)
+    $parsed = Read-PlatformBootstrapDocument $Path
+    $root = Split-Path -Parent $PSScriptRoot
+    $product = (Get-Content -Raw -LiteralPath (Join-Path $root '.config/product.json') | ConvertFrom-Json).product
+    if ($parsed.definition.product -cne $product) { throw 'bootstrap.productMismatch' }
     return $parsed
 }
 
@@ -223,7 +236,7 @@ function New-PlatformBootstrapPlan {
         }
         else { $operation.state = 'Drift'; $operation.action = 'Reconcile' }
     }
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $definition)) {
         $settings = $definition.environments[$environment]
         $identityState = 'Unknown'; $identityAction = 'Inspect'
         $subject = $null
@@ -271,7 +284,7 @@ function New-PlatformBootstrapPlan {
     }
     $operations.Add(@{
         id = 'workflow.diagnostic'; executor = 'Workflow'; action = 'Inspect'; state = 'Unknown'
-        dependsOn = @('github.variables.dev', 'github.variables.staging', 'github.variables.prod')
+        dependsOn = @(Get-BootstrapEnvironments $definition | ForEach-Object { "github.variables.$_" })
         target = $definition.automation.repository
         desired = @{ implementation = 'pending'; cloudWrites = $false; expectedConclusion = 'success' }
     })
@@ -279,4 +292,4 @@ function New-PlatformBootstrapPlan {
     return New-PlatformBootstrapResult -Mode Plan -Status $status -Parsed $Parsed -Checks @($checks) -Operations @($operations)
 }
 
-Export-ModuleMember -Function Read-PlatformBootstrapDefinition, New-PlatformBootstrapResult, Get-PlatformBootstrapObservation, New-PlatformBootstrapPlan, ConvertTo-PlatformBootstrapJson
+Export-ModuleMember -Function Read-PlatformBootstrapDefinition, Read-PlatformBootstrapDocument, New-PlatformBootstrapResult, Get-PlatformBootstrapObservation, New-PlatformBootstrapPlan, ConvertTo-PlatformBootstrapJson, Get-BootstrapEnvironments

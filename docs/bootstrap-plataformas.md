@@ -10,6 +10,10 @@ y [ADR 0014](adr/0014-bootstrap-ejecutable-con-aislamiento-por-ambiente.md).
 CI prueba con dobles y mocks. No hay evidencia cloud de un producto hasta ejecutar su recorrido y
 obtener `Verified`. Este bloque no implementa Genesis/Apocalypse ni el despliegue completo de 9C.
 
+Las pruebas del documento YAML son independientes del nombre del producto generado. La entrada
+operativa `Read-PlatformBootstrapDefinition` añade siempre la comprobación contra
+`.config/product.json`; las CLI de ejecución conservan esa frontera.
+
 ## Definición y precondiciones
 
 Copia [platform-bootstrap.yaml](../examples/platform-bootstrap.yaml) a
@@ -64,8 +68,8 @@ administración. No existen contraseñas ni certificados creados por este recorr
 administradas, no una aplicación Entra con credenciales estáticas. El adaptador Azure DevOps/WIF
 sigue pendiente y no se afirma haber comprobado sus credenciales.
 
-El contenedor YAML, por ejemplo `tfstate`, queda para bootstrap; los ambientes usan `tfstate-dev`,
-`tfstate-staging` y `tfstate-prod`. Los nombres derivados deben caber en 63 caracteres. Separar claves
+El contenedor YAML, por ejemplo `tfstate`, queda para bootstrap; esta referencia usa `tfstate-dev`.
+Los nombres derivados deben caber en 63 caracteres. Separar claves
 dentro del mismo contenedor no se considera aislamiento. Los estados bootstrap se guardan en
 `<product>/bootstrap/state.tfstate` y `<product>/bootstrap/access.tfstate`.
 
@@ -129,7 +133,7 @@ no recalcula ni usa `-auto-approve`. No elimina recursos ni resuelve reemplazos 
 Después de cambios o una aplicación parcial, ejecuta **Prepare de nuevo** y revisa su nuevo hash;
 no reutilices el plan anterior. Terraform detecta el estado desactualizado y mantiene el locking.
 
-La etapa GitHub configura prod antes de conceder variables de despliegue. Los valores existentes
+La etapa GitHub configura los ambientes declarados antes de conceder variables de despliegue. Los valores existentes
 iguales no se reescriben y main no se duplica. No borra políticas de rama ajenas: una política adicional,
 tag permitido o regla de protección desconocida bloquea para que el operador la resuelva de forma
 explícita. Una escritura parcial no se presenta como Applied; se descubre y reconcilia en Prepare.
@@ -173,17 +177,17 @@ Una vez fusionado el workflow, con el YAML real confirmado en main, el operador 
 
 ```powershell
 $hash = (Get-FileHash $definition -Algorithm SHA256).Hash.ToLowerInvariant()
-gh workflow run platform-diagnostic.yml --ref main -f definition=.config/platform-bootstrap.yaml -f definition_sha256=$hash
+gh workflow run platform-diagnostic.yml --ref main -f definition=.config/platform-bootstrap.yaml -f definition_sha256=$hash -f environments_json='["dev"]'
 # Obtén el ID de esa ejecución; espera sus aprobaciones y su finalización.
 pwsh ./scripts/Invoke-PlatformBootstrap.ps1 -Definition $definition -Mode Verify -Workspace $workspace -DiagnosticRunId <id>
 ```
 
-El workflow **Platform Federation Diagnostic** usa tres jobs y los Environments dev/staging/prod,
+El workflow **Platform Federation Diagnostic** usa solo el job y Environment `dev` en esta referencia,
 OIDC con audiencia explícita y actions fijadas por commit. Solo main admite autenticación. Comprueba
 lectura de grupos/estado propios y rechazo **403** para grupos/estado de los demás ambientes y
 estado de bootstrap. Un 404 no demuestra aislamiento. No crea recursos ni publica tokens/cuerpos.
 
-Verify exige `success` en ejecución, tres jobs y todos los pasos obligatorios; también repositorio,
+Verify exige `success` en ejecución, el job seleccionado y todos sus pasos obligatorios; también repositorio,
 workflow, main, commit del checkout local y hash del YAML en el título generado. Rechaza canceled,
 skipped, neutral, timeout, respuestas parciales y fuentes locales alteradas. Una ejecución de otro
 YAML/commit no sirve como evidencia. No inicia workflows automáticamente.

@@ -47,7 +47,7 @@ function Get-BootstrapSourceHash {
 
 function Get-BootstrapContainers([hashtable] $Definition) {
     $containers = @{}
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $Definition)) {
         $name = "$($Definition.state.container)-$environment"
         if ($name.Length -gt 63) { throw 'bootstrap.containerTooLong' }
         $containers[$environment] = $name
@@ -76,7 +76,7 @@ function Get-BootstrapTerraformVariables([hashtable] $Definition, [hashtable] $O
     $containers = Get-BootstrapContainers $Definition
     if ($Stage -ceq 'State') {
         $groups = @{}
-        foreach ($environment in @('dev', 'staging', 'prod')) {
+        foreach ($environment in @(Get-BootstrapEnvironments $Definition)) {
             foreach ($group in $Definition.environments[$environment].resourceGroups) { $groups[$group] = $environment }
         }
         return @{
@@ -89,7 +89,7 @@ function Get-BootstrapTerraformVariables([hashtable] $Definition, [hashtable] $O
         }
     }
     $environments = @{}
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $Definition)) {
         $environments[$environment] = @{
             identity_name = $Definition.environments[$environment].identityName
             resource_groups = @($Definition.environments[$environment].resourceGroups)
@@ -118,7 +118,7 @@ function Initialize-BootstrapTerraform {
 function Get-BootstrapGithubDesired {
     param([hashtable] $Definition, [hashtable] $Bindings)
     $desired = @{}
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $Definition)) {
         $reviewers = @(
             foreach ($login in $Definition.environments[$environment].reviewers) {
                 $user = Invoke-BootstrapApi GET "users/$login"
@@ -147,7 +147,7 @@ function Get-BootstrapGithubDesired {
 function Get-BootstrapGithubSnapshot {
     param([hashtable] $Definition, [hashtable] $Observation)
     $snapshot = @{ actions = $Observation.actions; permissions = $Observation.workflowPermissions; environments = @{} }
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $Definition)) {
         $matches = @($Observation.environments | Where-Object name -CEQ $environment)
         if ($matches.Count -eq 0) { $snapshot.environments[$environment] = $null; continue }
         $base = "repos/$($Definition.automation.repository)/environments/$environment"
@@ -183,7 +183,7 @@ function Set-BootstrapGithub {
         Invoke-BootstrapApi PUT "$repo/actions/permissions/workflow" @{ default_workflow_permissions = 'read'; can_approve_pull_request_reviews = $false } | Out-Null
     }
     # Configure production protections before handing out deployment variables for any environment.
-    foreach ($environment in @('prod', 'staging', 'dev')) {
+    foreach ($environment in @(@('prod', 'staging', 'dev') | Where-Object { $Desired.ContainsKey($_) })) {
         $base = "$repo/environments/$environment"
         Invoke-BootstrapApi PUT $base $Desired[$environment].environment | Out-Null
         $previous = $Before.environments[$environment]
@@ -203,7 +203,7 @@ function Set-BootstrapGithub {
 function Assert-BootstrapGithub {
     param([hashtable] $Snapshot, [hashtable] $Desired)
     if (-not $Snapshot.actions.enabled -or $Snapshot.permissions.default_workflow_permissions -cne 'read' -or $Snapshot.permissions.can_approve_pull_request_reviews) { throw 'bootstrap.githubActionsDrift' }
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(@('dev', 'staging', 'prod') | Where-Object { $Desired.ContainsKey($_) })) {
         $actual = $Snapshot.environments[$environment]
         if ($null -eq $actual -or $actual.settings.can_admins_bypass -ne $false -or
             $actual.settings.deployment_branch_policy.protected_branches -ne $false -or
@@ -345,18 +345,28 @@ function Move-BootstrapState {
     $backend = Get-BootstrapBackend $definition State
     $exists = Invoke-BootstrapAzure @('storage', 'blob', 'exists', '--auth-mode', 'login', '--account-name', $definition.state.storageAccount, '--container-name', $definition.state.container, '--name', $backend.key) $definition
     if ($exists.exists -isnot [bool]) { throw 'bootstrap.migrationResponseInvalid' }
-    if (-not $exists.exists) {
+    $needsPush = -not $exists.exists
+    if (-not $needsPush) {
+        $existingText = Invoke-BootstrapNative terraform @("-chdir=$remoteDirectory", 'state', 'pull')
+        $existing = $existingText | ConvertFrom-Json -AsHashtable -Depth 100
+        # Backend init may create an empty state blob with its own lineage. Terraform accepts
+        # a normal, locked push into that state; a populated or previously used state is never replaced.
+        $needsPush = @($existing.resources).Count -eq 0 -and (-not $existing.outputs -or $existing.outputs.Count -eq 0) -and $existing.serial -le 1
+    }
+    if ($needsPush) {
         # State push takes the remote lock and refuses mismatching lineage/newer serial; never use -force.
         Invoke-BootstrapNative terraform @("-chdir=$remoteDirectory", 'state', 'push', '-lock-timeout=60s', $localPath) | Out-Null
     }
     $remoteText = Invoke-BootstrapNative terraform @("-chdir=$remoteDirectory", 'state', 'pull')
     $remote = $remoteText | ConvertFrom-Json -AsHashtable -Depth 100
-    if ($remote.lineage -cne $localState.lineage -or $remote.serial -ne $localState.serial -or
+    # Terraform may advance the serial by one while importing the local snapshot.
+    if ($remote.lineage -cne $localState.lineage -or $remote.serial -lt $localState.serial -or
+        $remote.serial -gt ($localState.serial + 1) -or
         (ConvertTo-PlatformBootstrapJson $remote.resources) -cne (ConvertTo-PlatformBootstrapJson $localState.resources)) { throw 'bootstrap.migrationMismatch' }
     Copy-Item -LiteralPath (Join-Path $script:bootstrapRoot 'terraform/bootstrap/azure/versions.tf') -Destination (Join-Path $directory 'versions.tf') -Force
     Initialize-BootstrapTerraform -Directory $directory -Definition $definition -Stage State
     $confirmation = (Invoke-BootstrapNative terraform @("-chdir=$directory", 'state', 'pull')) | ConvertFrom-Json -AsHashtable -Depth 100
-    if ($confirmation.lineage -cne $localState.lineage -or $confirmation.serial -ne $localState.serial) { throw 'bootstrap.migrationMismatch' }
+    if ($confirmation.lineage -cne $localState.lineage -or $confirmation.serial -ne $remote.serial) { throw 'bootstrap.migrationMismatch' }
     Write-BootstrapFile (Join-Path $directory 'remote.json') @{ definitionSha256 = $Parsed.sha256; lineage = $remote.lineage }
     # Exact known files inside the validated workspace; backups survive every earlier failure.
     foreach ($name in @('terraform.tfstate', 'terraform.tfstate.backup')) {
@@ -390,7 +400,7 @@ function Assert-BootstrapRoles {
         if ($null -ne $expected[$key]) {
             if ($assignment.conditionVersion -cne '2.0' -or ($assignment.condition -replace '\s', '') -cne ($expected[$key] -replace '\s', '')) { throw 'bootstrap.roleConditionDrift' }
         }
-        elseif ($assignment.condition) { throw 'bootstrap.roleConditionDrift' }
+        elseif ($assignment.ContainsKey('condition') -and $assignment.condition) { throw 'bootstrap.roleConditionDrift' }
     }
 }
 
@@ -400,8 +410,9 @@ function Assert-BootstrapDiagnostic {
         $Run.head_branch -cne 'main' -or $Run.head_sha -cne $Commit -or $Run.workflow_id -ne $WorkflowId -or
         $Run.repository.full_name -ine $Parsed.definition.automation.repository -or
         $Run.display_title -cne "Platform diagnostic $($Parsed.sha256)") { throw 'bootstrap.diagnosticRunInvalid' }
-    if ($Jobs.total_count -ne 3 -or @($Jobs.jobs).Count -ne 3) { throw 'bootstrap.diagnosticIncomplete' }
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    $environments = @(Get-BootstrapEnvironments $Parsed.definition)
+    if ($Jobs.total_count -ne $environments.Count -or @($Jobs.jobs).Count -ne $environments.Count) { throw 'bootstrap.diagnosticIncomplete' }
+    foreach ($environment in $environments) {
         $job = @($Jobs.jobs | Where-Object name -CEQ "diagnostic-$environment")
         if ($job.Count -ne 1 -or $job[0].conclusion -cne 'success' -or $job[0].status -cne 'completed') { throw 'bootstrap.diagnosticJobFailed' }
         foreach ($step in @('Validate trusted definition', 'Authenticate with environment identity', 'Verify federation and isolation')) {
@@ -436,7 +447,7 @@ function Test-BootstrapPlatform {
     $containerScope = "/subscriptions/$($definition.azure.subscriptionId)/resourceGroups/$($definition.state.resourceGroup)/providers/Microsoft.Storage/storageAccounts/$($definition.state.storageAccount)/blobServices/default/containers"
     $containers = Get-BootstrapContainers $definition
     $principals = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($environment in @('dev', 'staging', 'prod')) {
+    foreach ($environment in @(Get-BootstrapEnvironments $definition)) {
         $identity = Invoke-BootstrapAzure @('identity', 'show', '--resource-group', $definition.state.resourceGroup, '--name', $definition.environments[$environment].identityName) $definition
         if ($identity.tenantId -ine $definition.azure.tenantId -or $identity.clientId -ine $bindings[$environment].client_id -or
             $identity.principalId -ine $bindings[$environment].principal_id -or -not $principals.Add($identity.principalId)) { throw 'bootstrap.identityDrift' }

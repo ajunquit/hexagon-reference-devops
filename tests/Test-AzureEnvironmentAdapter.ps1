@@ -393,7 +393,10 @@ try {
 
     $entry = Join-Path $repository 'scripts/Invoke-AzureEnvironment.ps1'
     $unusedWorkspace = Join-Path $repository "artifacts/azure-whatif-$([guid]::NewGuid().ToString('N'))"
-    $output = & pwsh -NoProfile -File $entry -Mode Initialize -Inventory (Join-Path $repository 'examples/environment-inventory.json') -Environment dev -InstanceId run-12345-1 -Workspace $unusedWorkspace -WhatIf
+    $configuredProduct = (Get-Content -Raw -LiteralPath (Join-Path $repository '.config/product.json') | ConvertFrom-Json).product
+    $cliFixture = Join-Path $temporary 'cli-inventory.json'
+    [IO.File]::WriteAllText($cliFixture, (Get-Content -Raw -LiteralPath (Join-Path $repository 'examples/environment-inventory.json')).Replace('hexagon-template', $configuredProduct))
+    $output = & pwsh -NoProfile -File $entry -Mode Initialize -Inventory $cliFixture -Environment dev -InstanceId run-12345-1 -Workspace $unusedWorkspace -WhatIf
     Assert-True ($LASTEXITCODE -eq 2 -and ($output -join "`n" | ConvertFrom-Json).status -ceq 'Unverified' -and -not (Test-Path -LiteralPath $unusedWorkspace)) 'CLI WhatIf made changes or claimed success.'
     $buildDefinition = Copy-Value $inventory
     Invoke-Git @('update-ref', 'refs/remotes/origin/main', $commit) | Out-Null
@@ -401,6 +404,7 @@ try {
         $destination = Join-Path $source $path; [IO.Directory]::CreateDirectory($destination) | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $repository $path) -File -Force | Copy-Item -Destination $destination
     }
+    Write-Json (Join-Path $source '.config/product.json') @{ product = $inventory.product }
     $buildWorkspace = Join-Path $source 'artifacts/build-cli'
     $entry = Join-Path $source 'scripts/Invoke-AzureEnvironment.ps1'
     $definitionPath = Join-Path $temporary 'build-definition.json'; Write-Json $definitionPath $buildDefinition

@@ -1,0 +1,22 @@
+schemaVersion: 1
+product: hexagon-reference
+automation:
+  provider: GitHubActions
+  repository: ajunquit/hexagon-reference-devops
+  branch: main
+azure:
+  tenantId: 71747eda-0e30-46d9-a3dd-09adb3a83ff3
+  subscriptionId: b7fdb48a-4bf0-4c7b-9708-3d875a551936
+  location: eastus2
+state:
+  resourceGroup: rg-hexagon-reference-state
+  storageAccount: sthexrefb7fdb48a
+  container: tfstate
+environments:
+  dev:
+    identityName: id-hexagon-reference-dev-deploy
+    resourceGroups:
+      - rg-hexagon-reference-dev
+      - rg-hexagon-reference-dev-messaging
+      - rg-hexagon-reference-dev-auth
+    reviewers: []
