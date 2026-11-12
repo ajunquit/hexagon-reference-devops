@@ -1,0 +1,7 @@
+{
+  "apiVersion": "hexagon/template-sync/v1",
+  "component": "devops",
+  "template": "hexagon-template-devops",
+  "templateCommit": "0c96847b5c6c6bb44fb89ef93adbe5005f01cf52",
+  "factoryCommit": "82eb2c64ebe26d1bd187f3fb2003bdb0c5e7e91e"
+}
