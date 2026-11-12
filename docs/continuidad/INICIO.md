@@ -16,8 +16,10 @@ de cada repositorio ni una autorización para desplegar, publicar o fusionar.
 5. Seguir [el protocolo de colaboración y relevo](trabajo-entre-agentes.md): reservar alcance,
    trabajar en un checkout aislado, comprobar y abrir PR. Actualizar la evidencia antes de terminar.
 
-La fábrica de productos y este relevo ya están integrados. La entrega en revisión es F-01, la
-sincronización asistida de plantillas (Factory #2 y sus PR de documentación); ver el estado.
+La fábrica, el relevo, la sincronización asistida (F-01) y el catálogo vigente (F-04) están
+integrados, junto con Q-01, F-07, la ADR 0041, la adopción (F-05 y F-05b) y las fases H0 a H2 de HR.
+R-01 completó reference con la fábrica (falta integrar su último PR). Sigue, según el orden aceptado
+por el dueño, el hosting AWS (D-9A-AWS) y después los despliegues en `dev`. Ver el estado, los productos existentes y la última ficha en `relevos/`.
 **La validación Azure 9C está pausada**. Leer su guía o ver un selector `staging/prod` no la reanuda;
 la referencia autorizada solo contempla `dev`. Ver el estado para la restricción exacta.
 
@@ -53,6 +55,9 @@ sus scripts no son instrucciones para aplicar recursos de Hexagon.
 | [Estado](estado.md) | Checkpoint mutable con fecha, evidencias y PR; comprobar antes de usar. |
 | [Pendientes](pendientes.md) | Trabajo abierto, dependencias y condición de cierre. |
 | [Trabajo entre agentes](trabajo-entre-agentes.md) | Ramas, coordinación, comprobación, PR y relevo. |
+| [Productos existentes](productos-existentes.md) | HR y reference: estado, cómo se actualizan y ruta de adopción. |
+| [Fábrica incremental](fabrica-incremental.md) | Diseño para adoptar productos y añadir componentes (F-05/F-06). |
+| [Conocimiento de HR](hr-conocimiento.md) | Inventario y destino del conocimiento de HR (Vision, business, código). |
 
 No se copia el chat completo: contiene hipótesis, preguntas y decisiones después sustituidas.
 Conservar decisiones vigentes con fuente, evidencia y estado permite a cualquier modelo continuar
