@@ -3,6 +3,12 @@
 Esta ruta continúa los contratos Aplicación–DevOps definidos por las plantillas frontend y backend.
 Cada fase termina con pruebas y documentación antes de iniciar la siguiente.
 
+La [fábrica de productos](https://github.com/ajunquit/hexagon-template-ng/blob/main/docs/fabrica-de-productos.md)
+es una ruta complementaria para generar cuatro repositorios, incluido business. El coordinador
+`hexagon-product-factory` está implementado, verificado e integrado; no cambia
+contratos de ambiente ni autoriza despliegues. El [checkpoint de continuidad](continuidad/estado.md)
+registra evidencia y PR vigentes. La validación cloud de 9C permanece en pausa.
+
 ## Estado
 
 | Fase | Resultado | Estado |
@@ -26,9 +32,10 @@ Cada fase termina con pruebas y documentación antes de iniciar la siguiente.
 La fase 3 entregó la plantilla, la adopción de Terraform, el descriptor inmutable, validadores y
 límites de carpetas. No modificó pipelines de frontend o backend ni creó infraestructura.
 
-La plantilla es única para el producto. El backend inicial es un monolito modular; una futura
+La plantilla es única para el producto. El backend inicial puede ser un monolito simple MX o
+modular ML (ADR 0022); una futura
 extracción de servicios evoluciona la misma instancia DevOps y sus contratos, sin crear variantes
-`-ml` o `-ms` ni migrar el estado a otro repositorio.
+`-mx`, `-ml` o `-ms` ni migrar el estado a otro repositorio.
 
 Definition of Done:
 
@@ -157,7 +164,8 @@ Definition of Done:
 
 9A está integrada con la primera referencia Azure administrada. 9B incorpora [CI y artefactos](ci-y-artefactos.md)
 por componente; requiere configurar las lecturas privadas documentadas para ejecutar todo el backend.
-9C y 9D conservan el despliegue real y la promoción. No se ha aplicado infraestructura cloud.
+9C y 9D conservan el cierre del despliegue real y la promoción. La preparación parcial de una
+referencia no acredita un producto operativo; su validación final está pendiente y pausada.
 
 La preparación de 9C incorpora [bootstrap declarativo de plataformas](bootstrap-plataformas.md):
 contrato YAML, validación offline, plan de lectura y ejecución por etapas con planes revisados,
@@ -200,3 +208,12 @@ detallan a continuación. El E2E y la limpieza consentida se añaden en la guía
 La [publicación SPA y salud de hosting](publicacion-spa-y-salud.md) incorpora PublishWeb/VerifyServing
 con el candidato original y evidencia de archivos, configuración pública y API/Workers. Ya están
 implementados el E2E autenticado y la limpieza con consentimiento previo, según [aceptación integral](aceptacion-integral-azure.md). La ejecución Azure real sigue pendiente.
+
+## Reanudación de 9C tras la decisión de Auth integrado
+
+La [composición de Auth en una sola base](auth-y-base-compartida.md) es el ajuste previo al
+siguiente despliegue. La composición y sus pruebas locales/de protocolo ya están implementadas;
+falta adaptar la referencia y ejecutar diagnóstico federado, selección de candidatos, despliegue, aceptación autenticada y retirada
+con evidencia. El destino autorizado de la primera referencia es únicamente `dev`. Las funciones
+completas del módulo Auth se incorporan por incrementos y no se consideran implementadas por
+esta documentación. No se acredita el cierre de 9C hasta completar su ejecución real.

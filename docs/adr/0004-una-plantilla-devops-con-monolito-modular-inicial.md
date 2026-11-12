@@ -1,6 +1,6 @@
 # 0004. Una plantilla DevOps con monolito modular inicial
 
-- **Estado:** Aceptada
+- **Estado:** Sustituida parcialmente por [0022](0022-un-devops-para-monolitos-simples-y-modulares.md): se conserva una plantilla DevOps y se admite inicio simple o modular.
 - **Fecha:** 2026-11-08
 
 ## Contexto

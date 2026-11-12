@@ -310,6 +310,27 @@ try {
     }
     Assert-Rejected { Invoke-AzureApplicationStage $context $delivery $release ('a' * 64) DatabaseAccess $repository ('a' * 40) $temporary -Confirm:$false } 'migrationsRequired'
     Assert-True ($stageFixture.mutations -eq 0) 'Missing predecessor evidence allowed a job or activation.'
+    $integrated = Copy-Value $hosting
+    $integrated.inputs.keycloak = @{ realm = 'example' }
+    $integrated.inputs.keycloak_rollout_enabled = $false
+    $stageFixture.hosting = $integrated
+    $gate.maintenanceSha256 = Get-AzureDeliveryMaintenanceHash $context $integrated.inputs
+    Save-AzureDeliveryJournal $context $gate -Confirm:$false
+    foreach ($stage in @('PrepareIdentity', 'ApplyIdentity', 'Migrations')) {
+        Assert-Rejected { Invoke-AzureApplicationStage $context $delivery $release ('a' * 64) $stage $repository ('a' * 40) $temporary -Confirm:$false } 'databasePreparationRequired'
+    }
+    $integrated.inputs.keycloak_rollout_enabled = $true
+    Assert-Rejected { Invoke-AzureApplicationStage $context $delivery $release ('a' * 64) KeycloakDatabase $repository ('a' * 40) $temporary -Confirm:$false } 'alreadyStarted'
+    Assert-True ($stageFixture.mutations -eq 0) 'Missing identity evidence allowed a cloud mutation.'
+    $gate.jobs['keycloak-database'] = Copy-Value $durable.jobs.migrations
+    $gate.plan = @{ purpose = 'Identity'; reviewSha256 = 'c' * 64 }
+    Save-AzureDeliveryJournal $context $gate -Confirm:$false
+    $identityJournal = Read-AzureDeliveryJournal $context ('a' * 64)
+    Assert-True ($identityJournal.jobs['keycloak-database'].status -ceq 'Succeeded' -and $identityJournal.plan.purpose -ceq 'Identity') 'Identity preparation and reviewed plan were not preserved by the strict durable journal.'
+    $gate.jobs = @{}; $gate.plan = $null
+    $stageFixture.hosting = $hosting
+    $gate.maintenanceSha256 = $hash
+    Save-AzureDeliveryJournal $context $gate -Confirm:$false
     $before = $context.deliveryRevision
     $whatIf = Invoke-AzureApplicationStage $context $delivery $release ('a' * 64) Artifacts $repository ('a' * 40) $temporary -WhatIf
     Assert-True ($whatIf.status -ceq 'Unverified' -and $context.deliveryRevision -eq $before) 'Delivery WhatIf persisted a checkpoint.'

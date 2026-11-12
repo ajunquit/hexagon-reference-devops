@@ -6,7 +6,7 @@ namespace Hexagon.Database.Bootstrap;
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 internal sealed record BootstrapSettings(string Host, string Database, string Administrator, string ClientId,
-    Dictionary<string, BootstrapWorkload> Workloads)
+    Dictionary<string, BootstrapWorkload> Workloads, string? Purpose = null, bool MessagingEnabled = true)
 {
     public static BootstrapSettings Parse(string json)
     {
@@ -14,6 +14,7 @@ internal sealed record BootstrapSettings(string Host, string Database, string Ad
             ?? throw new InvalidOperationException("Invalid database bootstrap settings.");
         if (!Regex.IsMatch(settings.Host, "^[a-z][a-z0-9-]+[.]postgres[.]database[.]azure[.]com$") ||
             !Identifier(settings.Database) || !Identifier(settings.Administrator) || !ValidGuid(settings.ClientId) ||
+            (settings.Purpose is not null and not "keycloak") ||
             settings.Workloads.Count == 0 || settings.Workloads.Any(pair => !Identifier(pair.Key) ||
                 pair.Key == settings.Administrator || !ValidGuid(pair.Value.ObjectId)) ||
             settings.Workloads.Values.Select(value => value.ObjectId).Distinct(StringComparer.OrdinalIgnoreCase).Count() != settings.Workloads.Count)

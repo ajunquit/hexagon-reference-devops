@@ -26,13 +26,13 @@
     },
     "jobs": {
       "type": "object", "additionalProperties": false,
-      "properties": { "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" } }
+      "properties": { "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "keycloak-database": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" } }
     },
     "maintenanceSha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
     "plan": {
       "oneOf": [{ "type": "null" }, {
         "type": "object", "additionalProperties": false, "required": ["purpose", "reviewSha256"],
-        "properties": { "purpose": { "enum": ["Maintenance", "Activation"] }, "reviewSha256": { "$ref": "#/$defs/hash" } }
+        "properties": { "purpose": { "enum": ["Maintenance", "Identity", "Activation"] }, "reviewSha256": { "$ref": "#/$defs/hash" } }
       }]
     },
     "activated": { "type": "boolean" },

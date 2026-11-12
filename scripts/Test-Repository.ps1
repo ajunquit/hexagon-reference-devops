@@ -49,6 +49,8 @@ $requiredPaths = @(
     'contracts/schemas/application-delivery-journal-v1.schema.json',
     'contracts/schemas/application-delivery-result-v1.schema.json',
     'tests/Test-ApplicationDelivery.ps1',
+    'tests/Test-KeycloakDelivery.ps1',
+    'scripts/AzureKeycloakDelivery.psm1',
     '.github/workflows/delivery.yml',
     'docs/entrega-aplicaciones-azure.md',
     'scripts/Invoke-EphemeralBootstrap.ps1',
@@ -262,7 +264,11 @@ if ($parserErrors.Count -gt 0) {
 & (Join-Path $repositoryRoot 'tests/Test-EnvironmentLifecycle.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-AzureEnvironmentAdapter.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-EnvironmentWorkflow.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-ApplicationDelivery.ps1')
+# Delivery HTTP fixtures must not reuse the lifecycle suites' cached module mocks.
+& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-ApplicationDelivery.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Application delivery tests failed.' }
+& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-KeycloakDelivery.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Integrated identity delivery tests failed.' }
 & pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-Acceptance.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Acceptance consent and cleanup protocol tests failed.' }
 & node --test (Join-Path $repositoryRoot 'acceptance/browser.test.mjs')
@@ -278,15 +284,15 @@ $operationsTestProject = Join-Path $repositoryRoot 'operations/Hexagon.Messaging
 if ($LASTEXITCODE -ne 0) { throw 'Messaging operations unit tests failed.' }
 
 if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
-    throw 'Terraform 1.10 or newer is required to validate the infrastructure modules.'
+    throw 'Terraform 1.11 or newer is required to validate the infrastructure modules.'
 }
 $terraformVersionOutput = & terraform version -json
 if ($LASTEXITCODE -ne 0) {
     throw 'Could not read the installed Terraform version.'
 }
 $terraformVersion = [version] (($terraformVersionOutput | ConvertFrom-Json).terraform_version)
-if ($terraformVersion -lt [version] '1.10.0' -or $terraformVersion -ge [version] '2.0.0') {
-    throw "Terraform >= 1.10.0 and < 2.0.0 is required; found $terraformVersion."
+if ($terraformVersion -lt [version] '1.11.0' -or $terraformVersion -ge [version] '2.0.0') {
+    throw "Terraform >= 1.11.0 and < 2.0.0 is required; found $terraformVersion."
 }
 
 & (Join-Path $repositoryRoot 'tests/Test-LocalStateTransfer.ps1')

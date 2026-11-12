@@ -7,4 +7,14 @@ output "maintenance_jobs" { value = { for id, job in azurerm_container_app_job.m
 output "registry" { value = { id = azurerm_container_registry.this.id, login_server = azurerm_container_registry.this.login_server } }
 output "web" { value = { id = azurerm_static_web_app.this.id, url = "https://${azurerm_static_web_app.this.default_host_name}" } }
 output "api_url" { value = var.application_rollout_enabled ? "https://${azurerm_container_app.workload[local.api_id].ingress[0].fqdn}/api/v1" : null }
-output "frontend_authentication" { value = { authority = var.auth.authority, clientId = var.auth.client_id, scope = "openid profile email ${var.auth.api_scope}" } }
+output "frontend_authentication" { value = { authority = local.auth_authority, clientId = var.auth.client_id, scope = "openid profile email ${var.auth.api_scope}" } }
+
+output "keycloak" {
+  value = local.keycloak_enabled ? {
+    id        = var.keycloak_rollout_enabled ? azurerm_container_app.keycloak[0].id : null
+    origin    = local.keycloak_origin
+    authority = local.auth_authority
+    role      = local.keycloak_role
+    identity  = azurerm_user_assigned_identity.keycloak[0].id
+  } : null
+}

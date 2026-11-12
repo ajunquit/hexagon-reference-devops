@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot 'AzureKeycloakDelivery.psm1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 foreach ($name in @('PlatformBootstrap', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'AzureEnvironmentStore', 'TerraformAzureLifecycle', 'AzureLifecycleInputs', 'ApplicationArtifacts', 'AzureOciDelivery', 'AzureMaintenanceDelivery', 'AzureWebDelivery', 'StaticWebPublication', 'AzureAcceptance', 'AcceptanceCleanup', 'AcceptanceRun')) {
@@ -97,6 +98,10 @@ function Assert-AzureDeliveryImages([hashtable] $Journal, [hashtable] $Hosting) 
 }
 
 function Get-AzureDeliveryBoundInputs([hashtable] $Context, [hashtable] $Inputs) {
+    if ($Inputs.ContainsKey('messaging_enabled') -and $Inputs.messaging_enabled -eq $false) {
+        if (@($Context.inventory.roots | Where-Object id -CEQ 'messaging').Count -ne 0) { throw 'lifecycle.delivery.messagingUnexpected' }
+        return (ConvertTo-PlatformBootstrapJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40
+    }
     $messaging = Get-AzureLifecycleDeploymentState $Context messaging
     $value = (ConvertTo-PlatformBootstrapJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40
     if ($messaging.outputs.workload_bindings -isnot [Collections.IDictionary]) { throw 'lifecycle.delivery.messagingBindingsUnavailable' }
@@ -114,7 +119,11 @@ function Get-AzureDeliveryBoundInputs([hashtable] $Context, [hashtable] $Inputs)
 }
 
 function Get-AzureDeliveryMaintenanceHash([hashtable] $Context, [hashtable] $Inputs) {
-    $value = @{} + $Inputs; $value.Remove('application_rollout_enabled')
+    $value = @{} + $Inputs; $value.Remove('application_rollout_enabled'); $value.Remove('keycloak_rollout_enabled')
+    if ($Inputs.ContainsKey('messaging_enabled') -and $Inputs.messaging_enabled -eq $false) {
+        if (@($Context.inventory.roots | Where-Object id -CEQ 'messaging').Count -ne 0) { throw 'lifecycle.delivery.messagingUnexpected' }
+        return Get-SnapshotHash @{ hosting = $value; iacCommit = $Context.inventory.iac.commit; messaging = $null }
+    }
     $messaging = @($Context.inventory.roots | Where-Object id -CEQ 'messaging')[0]
     if ($messaging.status -cne 'Verified') { throw 'lifecycle.delivery.messagingNotReady' }
     return Get-SnapshotHash @{ hosting = $value; iacCommit = $Context.inventory.iac.commit; messaging = @{ lineage = $messaging.stateLineage; serial = $messaging.stateSerial; inputsSha256 = $messaging.inputsSha256 } }
@@ -126,7 +135,9 @@ function Assert-AzureDeliveryMaintenance([hashtable] $Context, [hashtable] $Jour
     $bound = Get-AzureDeliveryBoundInputs $Context $Hosting.inputs
     if ((Get-SnapshotHash $bound) -cne (Get-SnapshotHash $Hosting.inputs)) { throw 'lifecycle.delivery.messagingNotBound' }
     if ($RequireJobs) {
-        foreach ($id in @('migrations', 'database-access')) {
+        $requiredJobs = @('migrations', 'database-access')
+        if (Test-IntegratedKeycloak $Hosting.inputs) { $requiredJobs += 'keycloak-database' }
+        foreach ($id in $requiredJobs) {
             if (-not $Journal.jobs.ContainsKey($id) -or $Journal.jobs[$id].status -cne 'Succeeded') { throw 'lifecycle.delivery.successfulJobsRequired' }
         }
     }
@@ -149,7 +160,7 @@ function Get-AzureDeliveryJobSpec([hashtable] $Context, [hashtable] $Hosting, [s
     $environment = $(if ($Job -cin @('migrations', 'acceptance-seed')) {
         @{ ASPNETCORE_ENVIRONMENT = 'Production'; AZURE_CLIENT_ID = $outputs.database_bootstrap.clientId
             "ConnectionStrings__$($inputs.database_connection_name)" = "Host=$($outputs.database_bootstrap.host);Database=$($outputs.database_bootstrap.database);Username=$($outputs.database_bootstrap.administrator);SSL Mode=VerifyFull"
-            Auth__Authority = $inputs.auth.authority; Auth__Audience = $inputs.auth.audience; Auth__ApiScope = $inputs.auth.api_scope }
+            Auth__Authority = (Get-AzureHostingAuthority $inputs $outputs); Auth__Audience = $inputs.auth.audience; Auth__ApiScope = $inputs.auth.api_scope }
     } else { @{ HEXAGON_DATABASE_BOOTSTRAP = ConvertTo-Json -InputObject $outputs.database_bootstrap -Depth 20 -Compress } })
     if ($Job -ceq 'acceptance-seed') {
         $fixture = Get-AcceptanceFixture $Context.inventory $inputs
@@ -157,14 +168,28 @@ function Get-AzureDeliveryJobSpec([hashtable] $Context, [hashtable] $Hosting, [s
         if ($embedded.Count -ne 1 -or (Get-SnapshotHash ($embedded[0].value | ConvertFrom-Json -AsHashtable)) -cne (Get-SnapshotHash $fixture)) { throw 'lifecycle.acceptance.fixtureChanged' }
         $environment.HEXAGON_ACCEPTANCE_SEED = $embedded[0].value
     }
-    if ($Job -ceq 'database-access') {
+    if ($Job -cin @('database-access', 'keycloak-database')) {
         # Compare the embedded JSON semantically with Terraform jsonencode, then use the exact ARM bytes.
         $embedded = @($actual.properties.template.containers[0].env | Where-Object name -CEQ 'HEXAGON_DATABASE_BOOTSTRAP')
-        if ($embedded.Count -ne 1 -or (Get-SnapshotHash ($embedded[0].value | ConvertFrom-Json -AsHashtable -Depth 20)) -cne (Get-SnapshotHash $outputs.database_bootstrap)) { throw 'lifecycle.delivery.databaseBindingsChanged' }
+        $bootstrap = @{} + $outputs.database_bootstrap
+        if ($Job -ceq 'keycloak-database') { $bootstrap.purpose = 'keycloak' }
+        if ($embedded.Count -ne 1 -or (Get-SnapshotHash ($embedded[0].value | ConvertFrom-Json -AsHashtable -Depth 20)) -cne (Get-SnapshotHash $bootstrap)) { throw 'lifecycle.delivery.databaseBindingsChanged' }
         $environment.HEXAGON_DATABASE_BOOTSTRAP = $embedded[0].value
     }
+    if ($Job -ceq 'keycloak-database') {
+        if (-not (Test-IntegratedKeycloak $inputs)) { throw 'lifecycle.identity.notIntegrated' }
+        $environment.HEXAGON_KEYCLOAK_DATABASE = ConvertTo-Json -InputObject @{ role = $outputs.keycloak.role } -Compress
+        $embedded = @($actual.properties.template.containers[0].env | Where-Object name -CEQ 'HEXAGON_KEYCLOAK_DATABASE')
+        if ($embedded.Count -ne 1 -or (Get-SnapshotHash ($embedded[0].value | ConvertFrom-Json -AsHashtable)) -cne (Get-SnapshotHash @{ role = $outputs.keycloak.role })) { throw 'lifecycle.identity.bindingChanged' }
+        $environment.HEXAGON_KEYCLOAK_DATABASE = $embedded[0].value
+        $environment.HEXAGON_KEYCLOAK_DATABASE_PASSWORD = @{ secretRef = 'keycloak-database-password' }
+        $secrets = @($actual.properties.configuration.secrets)
+        if ($secrets.Count -ne 1 -or $secrets[0].name -cne 'keycloak-database-password' -or
+            $secrets[0].keyVaultUrl -cne $inputs.keycloak.database_password.secret_uri -or $secrets[0].identity -ine $identities[0] -or
+            ($secrets[0].ContainsKey('value') -and $secrets[0].value)) { throw 'lifecycle.identity.secretReferenceChanged' }
+    }
     $expected = @{ name = 'maintenance'; image = $(if ($Job -cin @('migrations', 'acceptance-seed')) { $inputs.workloads[$inputs.migration_workload].image } else { $inputs.bootstrap_image })
-        args = @($(if ($Job -ceq 'migrations') { @('--migrate-only') } elseif ($Job -ceq 'acceptance-seed') { @('--seed-acceptance-only') } else { @() })); environment = $environment; cpu = 0.5; memory = '1Gi' }
+        args = @($(if ($Job -ceq 'migrations') { @('--migrate-only') } elseif ($Job -ceq 'acceptance-seed') { @('--seed-acceptance-only') } elseif ($Job -ceq 'keycloak-database') { @('--prepare-keycloak') } else { @() })); environment = $environment; cpu = 0.5; memory = '1Gi' }
     return @{ id = $jobId; expected = $expected }
 }
 
@@ -219,7 +244,7 @@ function Invoke-AzureDeliveryPlan([hashtable] $Context, [hashtable] $Journal, [s
 function Invoke-AzureApplicationStage {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([hashtable] $Context, [hashtable] $Delivery, [hashtable] $Release, [string] $DeliverySha256,
-        [ValidateSet('Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
+        [ValidateSet('Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity', 'Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
         [string] $Repository, [string] $TrustedCommit, [string] $Workspace, [string] $ReviewSha256, [string] $Confirmation)
     if (-not $PSCmdlet.ShouldProcess($Context.prefix, "Run application delivery stage $Stage")) { return @{ status = 'Unverified'; applicationVerified = $false; details = @{} } }
     Assert-AzureLifecycleRuntime $Context
@@ -229,7 +254,7 @@ function Invoke-AzureApplicationStage {
         $journal.web.status = 'Published'; $journal.web.evidenceSha256 = $null
         Save-AzureDeliveryJournal $Context $journal -Confirm:$false
     }
-    $hosting = Get-AzureDeliveryHosting $Context $Release -AllowPendingPlan:($Stage -cin @('PrepareMaintenance', 'ApplyMaintenance', 'PrepareActivation', 'ApplyActivation'))
+    $hosting = Get-AzureDeliveryHosting $Context $Release -AllowPendingPlan:($Stage -cin @('PrepareMaintenance', 'ApplyMaintenance', 'PrepareIdentity', 'ApplyIdentity', 'PrepareActivation', 'ApplyActivation'))
     $details = @{}
     if ($Stage -ceq 'Artifacts') {
         if ($hosting.inputs.application_rollout_enabled -or $journal.activated) { throw 'lifecycle.delivery.alreadyActivated' }
@@ -261,8 +286,30 @@ function Invoke-AzureApplicationStage {
         Assert-AzureDeliveryMaintenance $Context $journal $hosting -RequireJobs:($Stage -cin @('PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance'))
         Assert-AzureOciImages $Context $hosting.references $hosting.registry.login_server
         if ($Stage -cin @('Migrations', 'DatabaseAccess', 'ApplyMaintenance') -and $hosting.inputs.application_rollout_enabled) { throw 'lifecycle.delivery.activationOrderInvalid' }
+        if ($Stage -cin @('KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity') -and -not (Test-IntegratedKeycloak $hosting.inputs)) { throw 'lifecycle.identity.notIntegrated' }
+        if ($Stage -cin @('Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')) {
+            if ((Test-IntegratedKeycloak $hosting.inputs) -and (-not $journal.jobs.ContainsKey('keycloak-database') -or $journal.jobs['keycloak-database'].status -cne 'Succeeded')) { throw 'lifecycle.identity.databasePreparationRequired' }
+            Assert-AzureIntegratedIdentityReady $Context $hosting
+        }
         switch ($Stage) {
             'ApplyMaintenance' { Invoke-AzureDeliveryPlan $Context $journal Maintenance $ReviewSha256 $Confirmation $Workspace }
+            'KeycloakDatabase' {
+                if ($hosting.inputs.keycloak_rollout_enabled) { throw 'lifecycle.identity.alreadyStarted' }
+                Invoke-AzureDeliveryJob $Context $journal $hosting keycloak-database | Out-Null
+            }
+            { $_ -cin @('PrepareIdentity', 'ApplyIdentity') } {
+                if (-not $journal.jobs.ContainsKey('keycloak-database') -or $journal.jobs['keycloak-database'].status -cne 'Succeeded') { throw 'lifecycle.identity.databasePreparationRequired' }
+                Invoke-AzureDeliveryJob $Context $journal $hosting keycloak-database | Out-Null
+                if ($Stage -ceq 'PrepareIdentity') {
+                    $inputs = @{} + $hosting.inputs; $inputs.keycloak_rollout_enabled = $true
+                    Set-AzureDeliveryInputs $Context $inputs $Repository $TrustedCommit $Workspace
+                    $details.reviewSha256 = New-AzureDeliveryPlan $Context $journal Identity $Workspace
+                }
+                else {
+                    if (-not $hosting.inputs.keycloak_rollout_enabled) { throw 'lifecycle.identity.rolloutInputsRequired' }
+                    Invoke-AzureDeliveryPlan $Context $journal Identity $ReviewSha256 $Confirmation $Workspace
+                }
+            }
             'Migrations' { Invoke-AzureDeliveryJob $Context $journal $hosting migrations | Out-Null }
             'DatabaseAccess' {
                 if (-not $journal.jobs.ContainsKey('migrations') -or $journal.jobs.migrations.status -cne 'Succeeded') { throw 'lifecycle.delivery.migrationsRequired' }

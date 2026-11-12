@@ -1,3 +1,4 @@
+Import-Module (Join-Path $PSScriptRoot 'AzureKeycloakDelivery.psm1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 foreach ($name in @('AzureEnvironmentStore', 'LifecycleNative', 'EnvironmentSnapshot', 'PlatformBootstrap', 'StaticWebPublication', 'StaticWebClient', 'ApplicationArtifacts', 'ApplicationContracts')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
@@ -44,7 +45,7 @@ function Assert-AzureWorkloadTemplate([hashtable] $Template, [hashtable] $Config
     $expected.ASPNETCORE_ENVIRONMENT = 'Production'; $expected.HTTP_PORTS = $Workload.http_ports -join ';'; $expected.AZURE_CLIENT_ID = $Identity.client_id
     $expected["ConnectionStrings__$($Inputs.database_connection_name)"] = "Host=$($Outputs.database_bootstrap.host);Database=$($Outputs.database_bootstrap.database);Username=$($Identity.database_role);SSL Mode=VerifyFull"
     if ($Workload.kind -ceq 'api') {
-        $expected.Auth__Authority = $Inputs.auth.authority; $expected.Auth__Audience = $Inputs.auth.audience; $expected.Auth__ApiScope = $Inputs.auth.api_scope; $expected.AllowedOrigins = $Outputs.web.url
+        $expected.Auth__Authority = Get-AzureHostingAuthority $Inputs $Outputs; $expected.Auth__Audience = $Inputs.auth.audience; $expected.Auth__ApiScope = $Inputs.auth.api_scope; $expected.AllowedOrigins = $Outputs.web.url
     }
     $actual = @{}; $references = @{}
     foreach ($item in $container.env) {
@@ -70,6 +71,10 @@ function Assert-AzureWorkloadTemplate([hashtable] $Template, [hashtable] $Config
 function Get-AzureBackendHealth([hashtable] $Context, [hashtable] $Hosting) {
     $facts = @(); $outputs = $Hosting.state.outputs; $inputs = $Hosting.inputs
     $ownedApps = @($Hosting.state.resources | Where-Object type -CEQ 'azurerm_container_app')
+    if (Test-IntegratedKeycloak $inputs) {
+        Assert-AzureIntegratedIdentityReady $Context $Hosting
+        $ownedApps = @($ownedApps | Where-Object id -INE $outputs.keycloak.id)
+    }
     if ($ownedApps.Count -ne $inputs.workloads.Count) { throw 'lifecycle.web.workloadsUnrecorded' }
     foreach ($id in @($inputs.workloads.Keys | Sort-Object)) {
         Assert-AzureLifecycleLease $Context

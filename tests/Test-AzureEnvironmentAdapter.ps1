@@ -215,7 +215,9 @@ try {
             $fixture = $script:cloudFixture; $fixture.commands.Add(@{ arguments = $Arguments; environment = $Environment })
             if ($Tool -ceq 'az') {
                 if ($Arguments -contains 'deactivate') {
-                    $fixture.handler.Route('GET', "https://management.azure.com$($fixture.activeApp)/revisions?api-version=2024-03-01", 200, '{"value":[{"name":"fixture--one","properties":{"active":false}}]}')
+                    $name = $Arguments[[Array]::IndexOf($Arguments, '--name') + 1]
+                    $app = $fixture.activeApp -replace '/[^/]+$', "/$name"
+                    $fixture.handler.Route('GET', "https://management.azure.com$app/revisions?api-version=2024-03-01", 200, '{"value":[{"name":"fixture--one","properties":{"active":false}}]}')
                 }
                 elseif ($Arguments -contains 'servicebus') {
                     $fixture.handler.Route('GET', "https://management.azure.com$($fixture.namespace)/topics?api-version=2024-01-01", 200, (@{ value = @(@{ id = $fixture.topic; properties = @{ status = 'Disabled' } }) } | ConvertTo-Json -Depth 8))
@@ -331,6 +333,15 @@ try {
     Assert-True ($cloudFixture.commands.Count -eq $beforeCommands) 'Quiesce WhatIf executed an Azure mutation.'
     $evidence = Invoke-AzureLifecycleQuiesce $context -Confirm:$false
     Assert-True ($evidence.quiesced -and $cloudFixture.commands[$cloudFixture.commands.Count - 1].arguments -contains 'deactivate') 'Quiescence did not deactivate and re-observe the recorded revision.'
+    $authApp = "$scopeId/providers/Microsoft.App/containerApps/fixture-auth"
+    $quiesceInventory.roots[0].resources += @{ id = $authApp; type = 'azurerm_container_app'; address = 'azurerm_container_app.keycloak[0]'; current = $true; presence = 'Present' }
+    Set-ArmRoute "$scopeUri/resources?api-version=2021-04-01" @{ value = @(@{ id = $activeApp; type = 'Microsoft.App/containerApps' }, @{ id = $authApp; type = 'Microsoft.App/containerApps' }) }
+    Set-ArmRoute "https://management.azure.com$activeApp/revisions?api-version=2024-03-01" @{ value = @(@{ name = 'fixture--one'; properties = @{ active = $true } }) }
+    Set-ArmRoute "https://management.azure.com$authApp/revisions?api-version=2024-03-01" @{ value = @(@{ name = 'fixture--one'; properties = @{ active = $true } }) }
+    $beforeQuiesce = $cloudFixture.commands.Count
+    $evidence = Invoke-AzureLifecycleQuiesce $context -Confirm:$false
+    $deactivated = @($cloudFixture.commands | Select-Object -Skip $beforeQuiesce | Where-Object { $_.arguments -contains 'deactivate' })
+    Assert-True ($evidence.quiesced -and $deactivated.Count -eq 2 -and @($deactivated | Where-Object { $_.arguments -contains 'fixture-auth' }).Count -eq 1) 'Shared-database retirement did not stop both backend and identity.'
     $namespace = "$scopeId/providers/Microsoft.ServiceBus/namespaces/fixture"
     $topic = "$namespace/topics/events"
     $cloudFixture.namespace = $namespace; $cloudFixture.topic = $topic

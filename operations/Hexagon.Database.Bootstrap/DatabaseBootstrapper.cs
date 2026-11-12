@@ -38,10 +38,11 @@ internal static class DatabaseBootstrapper
         {
             // Identifiers were strictly validated before connecting. No application data is read or changed.
             var role = '"' + pair.Key + '"';
+            var runtimeRoles = settings.MessagingEnabled ? "hexagon_app, hexagon_outbox" : "hexagon_app";
             var sql = $"""
                 ALTER ROLE {role} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
                 GRANT CONNECT ON DATABASE "{settings.Database}" TO {role};
-                GRANT hexagon_app, hexagon_outbox TO {role} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+                GRANT {runtimeRoles} TO {role} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
                 REVOKE ALL ON SCHEMA platform FROM {role};
                 REVOKE ALL ON platform."Tenants", platform."Memberships" FROM {role};
                 """;
@@ -53,8 +54,32 @@ internal static class DatabaseBootstrapper
                     GRANT SELECT ON platform."Tenants", platform."Memberships" TO {role};
                     """;
             }
+            if (!settings.MessagingEnabled)
+            {
+                sql += $"""
+
+                    DO $$ BEGIN
+                        IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'hexagon_outbox') THEN
+                            REVOKE hexagon_outbox FROM {role};
+                        END IF;
+                    END $$;
+                    """;
+            }
             await using var command = new NpgsqlCommand(sql, database, transaction);
             await command.ExecuteNonQueryAsync(cancellationToken);
+            // This tool does not own Keycloak's schema: reject unexpected access instead of taking ownership.
+            await using var boundary = new NpgsqlCommand("""
+                SELECT EXISTS (
+                    SELECT FROM pg_namespace schema CROSS JOIN unnest(@roles) runtime_role(name)
+                    WHERE schema.nspname = 'keycloak'
+                      AND has_schema_privilege(runtime_role.name, schema.oid, 'USAGE,CREATE')
+                );
+                """, database, transaction);
+            boundary.Parameters.AddWithValue("roles", settings.MessagingEnabled ? new[] { pair.Key, "hexagon_app", "hexagon_outbox" } : new[] { pair.Key, "hexagon_app" });
+            if ((bool)(await boundary.ExecuteScalarAsync(cancellationToken))!)
+            {
+                throw new InvalidOperationException("Runtime access to the identity schema is not allowed.");
+            }
         }
         await transaction.CommitAsync(cancellationToken);
     }

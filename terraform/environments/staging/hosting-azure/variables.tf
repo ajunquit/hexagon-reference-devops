@@ -40,7 +40,7 @@ variable "auth" {
   description = "Existing Hexagon Auth public bindings. No product-owned identity server is created."
   type        = object({ authority = string, client_id = string, audience = string, api_scope = string })
   validation {
-    condition     = can(regex("^https://[A-Za-z0-9.-]+(?::443)?/[^?#@]+$", var.auth.authority)) && !endswith(var.auth.authority, "/")
+    condition     = var.auth.authority == null ? true : (can(regex("^https://[A-Za-z0-9.-]+(?::443)?/[^?#@]+$", var.auth.authority)) && !endswith(var.auth.authority, "/"))
     error_message = "Hexagon Auth requires a public HTTPS issuer."
   }
 }
@@ -118,4 +118,9 @@ variable "acceptance_fixture" {
     )
     error_message = "Acceptance fixtures require dev/staging, an ephemeral instance, a subject UUID and exactly its two isolated tenants."
   }
+}
+
+variable "messaging_enabled" {
+  type    = bool
+  default = true
 }

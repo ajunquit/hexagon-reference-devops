@@ -96,7 +96,10 @@
           ],
           "properties": {
             "authority": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "pattern": "^https://[A-Za-z0-9.-]+/[^?#@]+[^/]$"
             },
             "client_id": {
@@ -138,8 +141,127 @@
               "pattern": "^run-[1-9][0-9]{0,19}-[1-9][0-9]{0,3}$"
             }
           }
+        },
+        "keycloak": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "image",
+            "realm",
+            "bootstrap_user",
+            "server_password_revision",
+            "server_password",
+            "database_password",
+            "bootstrap_password"
+          ],
+          "properties": {
+            "image": {
+              "type": "string",
+              "pattern": "^quay\\.io/keycloak/keycloak@sha256:[0-9a-f]{64}$"
+            },
+            "realm": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$",
+              "not": {
+                "const": "master"
+              }
+            },
+            "bootstrap_user": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,62}$"
+            },
+            "server_password_revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "server_password": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "secret_uri",
+                "vault_resource_id"
+              ],
+              "properties": {
+                "secret_uri": {
+                  "type": "string",
+                  "pattern": "^https://[a-z0-9-]+\\.vault\\.azure\\.net/secrets/[A-Za-z0-9-]+/[a-f0-9]{32}$"
+                },
+                "vault_resource_id": {
+                  "type": "string",
+                  "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft.KeyVault/vaults/[a-z0-9-]+$"
+                }
+              }
+            },
+            "database_password": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "secret_uri",
+                "vault_resource_id"
+              ],
+              "properties": {
+                "secret_uri": {
+                  "type": "string",
+                  "pattern": "^https://[a-z0-9-]+\\.vault\\.azure\\.net/secrets/[A-Za-z0-9-]+/[a-f0-9]{32}$"
+                },
+                "vault_resource_id": {
+                  "type": "string",
+                  "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft.KeyVault/vaults/[a-z0-9-]+$"
+                }
+              }
+            },
+            "bootstrap_password": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "secret_uri",
+                "vault_resource_id"
+              ],
+              "properties": {
+                "secret_uri": {
+                  "type": "string",
+                  "pattern": "^https://[a-z0-9-]+\\.vault\\.azure\\.net/secrets/[A-Za-z0-9-]+/[a-f0-9]{32}$"
+                },
+                "vault_resource_id": {
+                  "type": "string",
+                  "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft.KeyVault/vaults/[a-z0-9-]+$"
+                }
+              }
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "keycloak"
+            ]
+          },
+          "then": {
+            "properties": {
+              "auth": {
+                "properties": {
+                  "authority": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "auth": {
+                "properties": {
+                  "authority": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "workloads": {
       "type": "object",
@@ -226,5 +348,25 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "infrastructure": {
+            "required": [
+              "keycloak"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "environment": {
+            "const": "dev"
+          }
+        }
+      }
+    }
+  ]
 }

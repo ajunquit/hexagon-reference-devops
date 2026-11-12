@@ -146,6 +146,30 @@ try {
     $apps['fixture-api'].properties.template.containers[0].image = 'wrong'; Set-Arm $apps['fixture-api'].id $apps['fixture-api']
     Assert-Rejected { Get-AzureBackendHealth $context $hosting } 'workloadImageChanged'
     $apps['fixture-api'].properties.template.containers[0].image = $inputs.workloads['fixture-api'].image; Set-Arm $apps['fixture-api'].id $apps['fixture-api']
+    # The integrated identity is owned and verified separately from backend workload evidence.
+    $webModule = Get-Module AzureWebDelivery
+    $identityFixture = @{ verified = 0 }
+    & $webModule { param($fixture) $script:identityFixture = $fixture
+        function script:Assert-AzureIntegratedIdentityReady { $script:identityFixture.verified++ }
+    } $identityFixture
+    $integratedHosting = Copy-Value $hosting
+    $integratedHosting.inputs.name_prefix = 'fixture'
+    $integratedHosting.inputs.keycloak = @{ realm = 'hexagon' }
+    $integratedHosting.state.outputs.keycloak = @{
+        id = "$scope/providers/Microsoft.App/containerApps/fixture-auth"
+        origin = 'https://fixture-auth.region.azurecontainerapps.io'
+        authority = 'https://fixture-auth.region.azurecontainerapps.io/realms/hexagon'
+        role = 'fixture-keycloak'
+    }
+    $integratedHosting.state.outputs.frontend_authentication = @{ authority = $integratedHosting.state.outputs.keycloak.authority }
+    foreach ($envItem in $apps['fixture-api'].properties.template.containers[0].env) {
+        if ($envItem.name -ceq 'Auth__Authority') { $envItem.value = $integratedHosting.state.outputs.keycloak.authority }
+    }
+    Set-Arm $apps['fixture-api'].id $apps['fixture-api']; Set-Arm $revisions['fixture-api'].id $revisions['fixture-api']
+    $integratedHosting.state.resources += @{ type = 'azurerm_container_app'; id = $integratedHosting.state.outputs.keycloak.id }
+    Assert-True ((Get-AzureBackendHealth $context $integratedHosting).Count -eq 2 -and $identityFixture.verified -eq 1) 'Identity was counted as an unrecorded backend workload or bypassed verification.'
+    $integratedHosting.state.resources += @{ type = 'azurerm_container_app'; id = "$scope/providers/Microsoft.App/containerApps/foreign" }
+    Assert-Rejected { Get-AzureBackendHealth $context $integratedHosting } 'workloadsUnrecorded'
     Set-Arm $webId @{ id = $webId; properties = @{ defaultHostname = 'fixture.azurestaticapps.net' } } '2023-12-01'
     $target = Get-AzureWebTarget $context $hosting
     Assert-True ($target.origin -ceq $origin) 'Web target was not tied to its recorded ARM resource.'

@@ -36,11 +36,19 @@ variable "database_name" {
 variable "database_connection_name" { type = string }
 variable "database_sku" { type = string }
 variable "database_storage_mb" { type = number }
+variable "messaging_enabled" {
+  type    = bool
+  default = true
+  validation {
+    condition     = var.messaging_enabled || alltrue([for workload in values(var.workloads) : workload.kind == "api"])
+    error_message = "Messaging-free hosting supports only API workloads."
+  }
+}
 variable "auth" {
-  description = "Existing Hexagon Auth public bindings. No product-owned identity server is created."
+  description = "External Hexagon Auth bindings, or a null authority for integrated Keycloak."
   type        = object({ authority = string, client_id = string, audience = string, api_scope = string })
   validation {
-    condition     = can(regex("^https://[A-Za-z0-9.-]+(?::443)?/[^?#@]+$", var.auth.authority)) && !endswith(var.auth.authority, "/")
+    condition     = var.auth.authority == null ? true : (can(regex("^https://[A-Za-z0-9.-]+(?::443)?/[^?#@]+$", var.auth.authority)) && !endswith(var.auth.authority, "/"))
     error_message = "Hexagon Auth requires a public HTTPS issuer."
   }
 }
@@ -94,7 +102,7 @@ variable "application_rollout_enabled" {
   type        = bool
   default     = false
   validation {
-    condition     = !var.application_rollout_enabled || var.maintenance_jobs_enabled
+    condition     = !var.application_rollout_enabled || (var.maintenance_jobs_enabled && (var.keycloak == null || var.keycloak_rollout_enabled))
     error_message = "Create and complete the maintenance jobs before enabling application rollout."
   }
 }
