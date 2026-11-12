@@ -8,12 +8,12 @@ locals {
   vault_access = merge([for id, workload in var.workloads : {
     for scope in distinct([for secret in values(workload.secret_references) : secret.vault_resource_id]) : "${id}/${sha1(scope)}" => { workload = id, scope = scope }
   }]...)
-  bootstrap = {
+  bootstrap = merge({
     host          = local.database_host, database = var.database_name,
     administrator = azurerm_user_assigned_identity.maintenance.name,
     clientId      = azurerm_user_assigned_identity.maintenance.client_id,
     workloads     = { for id, identity in azurerm_user_assigned_identity.workload : identity.name => { objectId = identity.principal_id, readDirectory = var.workloads[id].kind == "api" } }
-  }
+  }, var.messaging_enabled ? {} : { messagingEnabled = false })
   jobs = {
     migrations = {
       image = var.workloads[var.migration_workload].image
@@ -22,7 +22,7 @@ locals {
         ASPNETCORE_ENVIRONMENT                               = "Production"
         AZURE_CLIENT_ID                                      = azurerm_user_assigned_identity.maintenance.client_id
         "ConnectionStrings__${var.database_connection_name}" = "Host=${local.database_host};Database=${var.database_name};Username=${azurerm_user_assigned_identity.maintenance.name};SSL Mode=VerifyFull"
-        Auth__Authority                                      = var.auth.authority
+        Auth__Authority                                      = local.auth_authority
         Auth__Audience                                       = var.auth.audience
         Auth__ApiScope                                       = var.auth.api_scope
       }
@@ -33,6 +33,16 @@ locals {
       environment = { HEXAGON_DATABASE_BOOTSTRAP = jsonencode(local.bootstrap) }
     }
   }
+  identity_jobs = local.keycloak_enabled ? {
+    keycloak-database = {
+      image = var.bootstrap_image
+      args  = ["--prepare-keycloak"]
+      environment = {
+        HEXAGON_DATABASE_BOOTSTRAP = jsonencode(merge(local.bootstrap, { purpose = "keycloak" }))
+        HEXAGON_KEYCLOAK_DATABASE  = jsonencode(local.keycloak_bootstrap)
+      }
+    }
+  } : {}
   acceptance_jobs = var.acceptance_fixture == null ? {} : {
     acceptance-seed = {
       image       = var.workloads[var.migration_workload].image
@@ -99,20 +109,29 @@ resource "azurerm_user_assigned_identity" "maintenance" {
   tags                = local.tags
 }
 resource "azurerm_postgresql_flexible_server" "this" {
-  name                          = "${var.name_prefix}-postgres"
-  resource_group_name           = data.azurerm_resource_group.this.name
-  location                      = var.location
-  version                       = "17"
-  sku_name                      = var.database_sku
-  storage_mb                    = var.database_storage_mb
-  backup_retention_days         = 14
-  geo_redundant_backup_enabled  = var.environment == "prod"
-  delegated_subnet_id           = azurerm_subnet.database.id
-  private_dns_zone_id           = azurerm_private_dns_zone.database.id
-  public_network_access_enabled = false
+  lifecycle {
+    precondition {
+      condition     = var.auth.authority != null || local.keycloak_enabled
+      error_message = "Choose an external HTTPS issuer or integrated Keycloak."
+    }
+  }
+  name                              = "${var.name_prefix}-postgres"
+  resource_group_name               = data.azurerm_resource_group.this.name
+  location                          = var.location
+  version                           = "17"
+  sku_name                          = var.database_sku
+  storage_mb                        = var.database_storage_mb
+  backup_retention_days             = 14
+  geo_redundant_backup_enabled      = var.environment == "prod"
+  delegated_subnet_id               = azurerm_subnet.database.id
+  private_dns_zone_id               = azurerm_private_dns_zone.database.id
+  public_network_access_enabled     = false
+  administrator_login               = local.keycloak_enabled ? replace("${var.name_prefix}_bootstrap", "-", "_") : null
+  administrator_password_wo         = local.keycloak_enabled ? ephemeral.azurerm_key_vault_secret.postgres_administrator[0].value : null
+  administrator_password_wo_version = local.keycloak_enabled ? var.keycloak.server_password_revision : null
   authentication {
     active_directory_auth_enabled = true
-    password_auth_enabled         = false
+    password_auth_enabled         = local.keycloak_enabled
     tenant_id                     = data.azurerm_client_config.current.tenant_id
   }
   tags       = local.tags
@@ -183,8 +202,8 @@ resource "azurerm_static_web_app" "this" {
   tags                = local.tags
 }
 resource "azurerm_container_app_job" "maintenance" {
-  for_each                     = var.maintenance_jobs_enabled ? merge(local.jobs, local.acceptance_jobs) : {}
-  name                         = "${var.name_prefix}-${lookup({ database-access = "db-access", acceptance-seed = "e2e-seed" }, each.key, each.key)}"
+  for_each                     = var.maintenance_jobs_enabled ? merge(local.jobs, local.acceptance_jobs, local.identity_jobs) : {}
+  name                         = "${var.name_prefix}-${lookup({ database-access = "db-access", acceptance-seed = "e2e-seed", keycloak-database = "kc-database" }, each.key, each.key)}"
   resource_group_name          = data.azurerm_resource_group.this.name
   location                     = var.location
   container_app_environment_id = azurerm_container_app_environment.this.id
@@ -202,6 +221,14 @@ resource "azurerm_container_app_job" "maintenance" {
     server   = azurerm_container_registry.this.login_server
     identity = azurerm_user_assigned_identity.maintenance.id
   }
+  dynamic "secret" {
+    for_each = each.key == "keycloak-database" ? { database = var.keycloak.database_password } : {}
+    content {
+      name                = "keycloak-database-password"
+      key_vault_secret_id = secret.value.secret_uri
+      identity            = azurerm_user_assigned_identity.maintenance.id
+    }
+  }
   template {
     container {
       name   = "maintenance"
@@ -209,6 +236,13 @@ resource "azurerm_container_app_job" "maintenance" {
       args   = each.value.args
       cpu    = 0.5
       memory = "1Gi"
+      dynamic "env" {
+        for_each = each.key == "keycloak-database" ? [1] : []
+        content {
+          name        = "HEXAGON_KEYCLOAK_DATABASE_PASSWORD"
+          secret_name = "keycloak-database-password"
+        }
+      }
       dynamic "env" {
         for_each = each.value.environment
         content {
@@ -219,7 +253,7 @@ resource "azurerm_container_app_job" "maintenance" {
     }
   }
   tags       = local.tags
-  depends_on = [azurerm_role_assignment.image_pull, azurerm_postgresql_flexible_server_active_directory_administrator.maintenance, azurerm_postgresql_flexible_server_database.this]
+  depends_on = [azurerm_role_assignment.image_pull, azurerm_postgresql_flexible_server_active_directory_administrator.maintenance, azurerm_postgresql_flexible_server_database.this, azurerm_role_assignment.keycloak_preparation_secret]
 }
 resource "azurerm_container_app" "workload" {
   for_each                     = var.application_rollout_enabled ? var.workloads : {}
@@ -271,7 +305,7 @@ resource "azurerm_container_app" "workload" {
           AZURE_CLIENT_ID                                      = azurerm_user_assigned_identity.workload[each.key].client_id
           "ConnectionStrings__${var.database_connection_name}" = "Host=${local.database_host};Database=${var.database_name};Username=${azurerm_user_assigned_identity.workload[each.key].name};SSL Mode=VerifyFull"
           }, each.value.kind == "api" ? {
-          Auth__Authority = var.auth.authority, Auth__Audience = var.auth.audience, Auth__ApiScope = var.auth.api_scope
+          Auth__Authority = local.auth_authority, Auth__Audience = var.auth.audience, Auth__ApiScope = var.auth.api_scope
           AllowedOrigins  = "https://${azurerm_static_web_app.this.default_host_name}"
         } : {})
         content {

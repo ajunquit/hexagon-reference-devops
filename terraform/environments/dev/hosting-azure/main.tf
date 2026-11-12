@@ -1,4 +1,5 @@
 module "hosting" {
+  messaging_enabled           = var.messaging_enabled
   source                      = "../../../modules/hosting/azure"
   product                     = var.product
   environment                 = var.environment
@@ -13,6 +14,8 @@ module "hosting" {
   database_connection_name    = var.database_connection_name
   database_sku                = var.database_sku
   database_storage_mb         = var.database_storage_mb
+  keycloak                    = var.keycloak
+  keycloak_rollout_enabled    = var.keycloak_rollout_enabled
   auth                        = var.auth
   workloads                   = var.workloads
   migration_workload          = var.migration_workload

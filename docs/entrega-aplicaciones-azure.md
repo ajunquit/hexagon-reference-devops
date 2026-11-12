@@ -5,12 +5,24 @@ Este bloque de 9C conecta los candidatos de CI de 9B con la reserva y el inventa
 de la instancia y coordina jobs de migraciones, permisos PostgreSQL y activación de API/Workers.
 Terraform sigue siendo la única herramienta que define y modifica infraestructura.
 
+Con el perfil [Keycloak integrado en dev](auth-y-base-compartida.md), después de ApplyMaintenance
+se ejecutan `KeycloakDatabase`, `PrepareIdentity` y `ApplyIdentity` (plan revisado en despachos
+separados). Se prepara entonces el realm/cliente; solo después se admiten las migraciones y
+activación. La guía de identidad detalla secretos, permisos y límites. El perfil de emisor
+externo conserva la secuencia original.
+
 La [publicación SPA y verificación de salud](publicacion-spa-y-salud.md) completa ahora las etapas
 PublishWeb y VerifyServing. El recorrido autenticado navegador → API → Worker y la limpieza
 integral automática siguen pendientes en 9C. applicationVerified permanece false; Completed
 acredita una etapa concreta. La ejecución Azure real continúa pendiente.
 
 ## Precondiciones
+
+Para el perfil API-only sin mensajería, omitir el root messaging del inventario y usar los inputs
+exportados con `messaging_enabled=false`. La entrega valida esa ausencia y la vincula a su hash.
+Se necesita un candidato nuevo de operaciones para `messagingEnabled=false`; no se reutiliza una
+imagen anterior. El recorrido Acceptance con mensajería de esta guía corresponde al perfil ml;
+no acredita por sí mismo aceptación cloud de mx.
 
 1. Una reserva efímera real dev/staging, con identidad, contenedor, Environment protegido y
    diagnóstico de aislamiento satisfactorio. Producción y ambientes persistentes siguen fuera de

@@ -58,6 +58,15 @@ function ConvertTo-AzureHostingInput {
     $result.migration_workload = $Backend.migrations.workload
     $result.maintenance_jobs_enabled = $false
     $result.application_rollout_enabled = $false
+    $backendSource = @($Descriptor.components | Where-Object name -CEQ 'backend')[0]
+    if (@($backendSource.manifests | Where-Object path -CEQ '.hexagon/messaging-requirements.json').Count -eq 0) {
+        if (@($Backend.workloads | Where-Object kind -CNE 'api').Count -gt 0) { throw 'Messaging-free hosting requires API-only workloads.' }
+        $result.messaging_enabled = $false
+    }
+    if ($infra.ContainsKey('keycloak')) {
+        if ($Descriptor.environment -cne 'dev' -or $null -ne $infra.auth.authority) { throw 'Integrated identity requires dev and a null external authority.' }
+        $result.keycloak_rollout_enabled = $false
+    }
     $result.workloads = @{}
     foreach ($workload in $Backend.workloads) {
         if ($workload.healthPort -ne 8081 -or ($workload.httpPorts -join ',') -cne $(if ($workload.kind -ceq 'api') { '8080,8081' } else { '8081' })) { throw 'Unsupported workload ports.' }

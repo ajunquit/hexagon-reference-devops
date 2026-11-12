@@ -31,6 +31,7 @@ param(
     [string] $FrontendRef,
 
     [switch] $IncludeBackendHosting,
+    [switch] $WithoutBackendMessaging,
     [switch] $IncludeAcceptance
 )
 
@@ -54,6 +55,9 @@ if ($hasBackendRepository -ne $hasBackendRef) {
 }
 if ($IncludeBackendHosting -and -not $hasBackendRepository) {
     throw 'IncludeBackendHosting requires a backend component.'
+}
+if ($WithoutBackendMessaging -and (-not $hasBackendRepository -or -not $IncludeBackendHosting)) {
+    throw 'WithoutBackendMessaging requires a pinned backend hosting contract.'
 }
 if ($hasFrontendRepository -ne $hasFrontendRef) {
     throw 'FrontendRepository and FrontendRef must be provided together.'
@@ -96,14 +100,13 @@ if ($hasFrontendRepository) {
 
 if ($hasBackendRepository) {
     $commit = Resolve-GitHubCommit -Repository $BackendRepository -Reference $BackendRef
-    $path = '.hexagon/messaging-requirements.json'
-    $validated = Get-ValidatedApplicationManifest `
-        -Repository $BackendRepository `
-        -Commit $commit `
-        -Path $path `
-        -ExpectedProduct $Product `
-        -ExpectedComponent 'backend'
-    $manifests = @([ordered] @{ path = $path; sha256 = $validated.Sha256 })
+    $manifests = @()
+    if (-not $WithoutBackendMessaging) {
+        $path = '.hexagon/messaging-requirements.json'
+        $validated = Get-ValidatedApplicationManifest -Repository $BackendRepository -Commit $commit `
+            -Path $path -ExpectedProduct $Product -ExpectedComponent 'backend'
+        $manifests += [ordered] @{ path = $path; sha256 = $validated.Sha256 }
+    }
     if ($IncludeBackendHosting) {
         $hostingPath = '.hexagon/backend-hosting-requirements.json'
         $hosting = Get-ValidatedApplicationManifest -Repository $BackendRepository -Commit $commit `

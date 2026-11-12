@@ -84,6 +84,10 @@ try {
 
     & $generator -Product hexagon-example -Environment dev -BackendRepository invalid/not-requested -BackendRef main `
         -FrontendRepository invalid/not-requested -FrontendRef main -IncludeBackendHosting -IncludeAcceptance -WhatIf
+    Assert-Throws -Action {
+        & $generator -Product hexagon-example -Environment dev -BackendRepository invalid/not-requested -BackendRef main -WithoutBackendMessaging -WhatIf
+    } -ExpectedMessage 'WithoutBackendMessaging requires a pinned backend hosting contract'
+    & $generator -Product hexagon-example -Environment dev -BackendRepository invalid/not-requested -BackendRef main -IncludeBackendHosting -WithoutBackendMessaging -WhatIf
 
     & $generator `
         -Product 'hexagon-example' `

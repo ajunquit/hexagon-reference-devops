@@ -16,7 +16,7 @@ on:
         description: Deliver applications or review and run acceptance with ephemeral cleanup
         required: true
         type: choice
-        options: [Artifacts, PrepareMaintenance, ApplyMaintenance, Migrations, DatabaseAccess, PrepareActivation, ApplyActivation, PublishWeb, VerifyServing, PrepareAcceptance, Acceptance]
+        options: [Artifacts, PrepareMaintenance, ApplyMaintenance, KeycloakDatabase, PrepareIdentity, ApplyIdentity, Migrations, DatabaseAccess, PrepareActivation, ApplyActivation, PublishWeb, VerifyServing, PrepareAcceptance, Acceptance]
       delivery_sha256:
         description: SHA-256 of the tracked delivery.json on main
         required: true

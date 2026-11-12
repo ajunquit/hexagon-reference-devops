@@ -7,10 +7,14 @@ dependencia del dominio ni crea infraestructura desde las aplicaciones.
 
 ## Recursos y límites
 
+El mismo hosting admite una API sin mensajería para mx. La capacidad se deriva del descriptor
+explícito sin requisitos de mensajería y se valida como API-only. Su inventario no incluye el
+root messaging y el bootstrap no concede rol outbox. Ver [ADR 0022](adr/0022-un-devops-para-monolitos-simples-y-modulares.md).
+
 `terraform/modules/hosting/azure` y los roots `environments/{dev,staging,prod}/hosting-azure` crean:
 
-- resource group, VNet y subredes delegadas para cómputo y PostgreSQL, con DNS privado;
-- PostgreSQL Flexible Server 17 privado, TLS y autenticación Entra sin password;
+- VNet y subredes delegadas para cómputo y PostgreSQL, con DNS privado, en el grupo del bootstrap;
+- PostgreSQL Flexible Server 17 privado, TLS y autenticación Entra; el perfil Keycloak habilita además contraseña;
 - Container Registry sin cuenta administrativa y permisos AcrPull por identidad;
 - Container Apps Environment con Log Analytics, una identidad por API/Worker y otra de mantenimiento;
 - Static Web Apps Standard con su dominio HTTPS administrado por ambiente;
@@ -19,8 +23,10 @@ dependencia del dominio ni crea infraestructura desde las aplicaciones.
 
 Esta referencia usa los dominios administrados de Azure; no crea una zona DNS organizacional ni un
 WAF compartido. Un dominio propio exige su configuración explícita y un origen CORS/callback
-coherente antes de adoptarlo. Hexagon Auth es una dependencia de plataforma existente; aquí se
-referencia su cliente público, sin desplegar otro Keycloak de producto. Tampoco se crea un clúster
+coherente antes de adoptarlo. Se puede referenciar un emisor externo o adoptar el perfil opcional
+[Keycloak integrado en dev](auth-y-base-compartida.md), con una sola base de aplicación y esquema
+dedicado. Este perfil añade un proceso y un job SQL, sin implementar el módulo Auth. Requiere
+Terraform >= 1.11 y tres referencias versionadas a secretos preparados por el operador. Tampoco se crea un clúster
 RabbitMQ ni infraestructura de AWS desde este módulo. Sus hosts y credenciales deben resolverse
 antes de seleccionarlos para una combinación distinta de la referencia Azure.
 
@@ -162,3 +168,11 @@ Referencias: [Static Web Apps](https://learn.microsoft.com/en-us/azure/static-we
 [usuarios Entra PostgreSQL](https://learn.microsoft.com/en-us/azure/postgresql/security/security-manage-entra-users),
 [roles PostgreSQL Azure](https://learn.microsoft.com/en-us/azure/postgresql/security/security-access-control),
 [imágenes con SDK .NET](https://learn.microsoft.com/en-us/dotnet/core/containers/sdk-publish).
+
+## Ajuste pendiente: Auth integrado
+
+La [guía de Auth y base compartida](auth-y-base-compartida.md), conforme a la ADR de plataforma
+0036, define la evolución a una única base con esquema `keycloak` y esquemas Hexagon. El hosting
+actual no implementa esa composición. Antes del siguiente despliegue se debe resolver su dueño
+único, preparación SQL, permisos mínimos y dependencia de retirada, sin un segundo PostgreSQL
+para identidad. La referencia real se limita a `dev`.

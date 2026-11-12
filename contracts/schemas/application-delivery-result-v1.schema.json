@@ -5,7 +5,7 @@
   "properties": {
     "apiVersion": { "const": "hexagon.ec/application-delivery-result/v1" },
     "status": { "enum": ["Blocked", "Unverified", "Validated", "Prepared", "Completed"] },
-    "stage": { "enum": ["Validate", "Artifacts", "PrepareMaintenance", "ApplyMaintenance", "Migrations", "DatabaseAccess", "PrepareActivation", "ApplyActivation", "PublishWeb", "VerifyServing", "PrepareAcceptance", "Acceptance"] },
+    "stage": { "enum": ["Validate", "Artifacts", "PrepareMaintenance", "ApplyMaintenance", "KeycloakDatabase", "PrepareIdentity", "ApplyIdentity", "Migrations", "DatabaseAccess", "PrepareActivation", "ApplyActivation", "PublishWeb", "VerifyServing", "PrepareAcceptance", "Acceptance"] },
     "applicationVerified": { "const": false },
     "details": {
       "type": "object", "additionalProperties": false,

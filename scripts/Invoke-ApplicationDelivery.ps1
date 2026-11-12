@@ -8,7 +8,7 @@ param(
     [Parameter(Mandatory)][string] $InstanceId,
     [Parameter(Mandatory)][string] $DefinitionSha256,
     [Parameter(Mandatory)][string] $DeliverySha256,
-    [Parameter(Mandatory)][ValidateSet('Validate', 'Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
+    [Parameter(Mandatory)][ValidateSet('Validate', 'Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity', 'Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
     [string] $ReviewSha256, [string] $Confirmation
 )
 Set-StrictMode -Version Latest

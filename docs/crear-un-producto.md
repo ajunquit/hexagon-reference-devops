@@ -1,5 +1,24 @@
 # Crear el repositorio DevOps de un producto
 
+## Fábrica de cuatro componentes
+
+La [ADR de plataforma 0037](https://github.com/ajunquit/hexagon-template-ng/blob/main/docs/adr/0037-fabrica-productos-y-conocimiento-versionado.md)
+define un coordinador independiente con plantillas elegibles para business, frontend, backend
+y DevOps. El contrato global, catálogo, lock y coordinador están pendientes. Este documento
+conserva el recorrido específico que funciona hoy.
+
+Business concentra fuentes y requisitos aprobados enlazados con implementación y pruebas. Es
+documental: no es un workload, imagen OCI o componente de hosting en los descriptores existentes.
+La definición global de creación y los contratos Aplicación–DevOps tienen responsabilidades distintas.
+
+El coordinador reutilizará los generadores y registrará commits exactos de sus plantillas. Crear
+repositorios y aprovisionar infraestructura serán operaciones separadas; solo se prepararán los
+ambientes declarados. La misma plantilla DevOps acompaña al producto si evoluciona su backend.
+La [ruta global](https://github.com/ajunquit/hexagon-template-ng/blob/main/docs/fabrica-de-productos.md)
+no reanuda ni reemplaza la validación cloud pendiente de 9C.
+
+## Creación específica disponible
+
 Un producto Hexagon tiene repositorios de aplicación separados y una instancia propia de esta
 plantilla:
 
@@ -12,9 +31,25 @@ hexagon-hr-dotnet-ml  ─┘
 Esa separación aísla permisos, estado, radio de impacto, promoción y ciclo de vida. Esta plantilla
 no se usa como un repositorio central que aplique todos los productos.
 
-Tampoco se elige entre una plantilla DevOps `-ml` y otra `-ms`. El producto comienza con el monolito
-modular y conserva esta misma instancia si después extrae servicios. Así no se duplican módulos ni
+Tampoco se elige entre plantillas DevOps `-mx`, `-ml` o `-ms`. El producto comienza como monolito
+simple o modular y conserva esta misma instancia si después extrae servicios. Así no se duplican módulos ni
 se trasladan estados y recursos por un cambio de arquitectura backend.
+
+La [ADR 0022](adr/0022-un-devops-para-monolitos-simples-y-modulares.md) admite también un backend
+simple mx, conservando esta misma instancia DevOps. Para él, fijar hosting sin mensajería:
+
+```powershell
+pwsh ./scripts/New-ProductEnvironmentDescriptor.ps1 `
+  -Product hexagon-example -Environment dev `
+  -BackendRepository ajunquit/hexagon-example-dotnet-mx -BackendRef <commit> `
+  -FrontendRepository ajunquit/hexagon-example-ng -FrontendRef <commit> `
+  -IncludeBackendHosting -WithoutBackendMessaging
+```
+
+El descriptor solo declara capacidades presentes. No añadir un manifiesto ficticio de mensajes,
+un Worker ni un root messaging. El hosting exportado llevará `messaging_enabled=false`; el
+bootstrap SQL actualizado concede acceso sin requerir hexagon_outbox. Crear repositorios y
+aprovisionar cloud siguen siendo operaciones separadas.
 
 ## 1. Crear desde la plantilla
 

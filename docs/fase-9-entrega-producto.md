@@ -155,3 +155,12 @@ remota de `Hexagon.Core.*` sigue requiriendo autorización explícita del dueño
 La [publicación SPA y salud de hosting](publicacion-spa-y-salud.md) incorpora PublishWeb/VerifyServing
 con el candidato original y evidencia de archivos, configuración pública y API/Workers. Ya están
 implementados el E2E autenticado y la limpieza con consentimiento previo, según [aceptación integral](aceptacion-integral-azure.md). La ejecución Azure real sigue pendiente.
+
+## Reanudación de 9C tras la decisión de Auth integrado
+
+La [composición de Auth en una sola base](auth-y-base-compartida.md) es el ajuste previo al
+siguiente despliegue. La composición y sus pruebas locales/de protocolo ya están implementadas;
+falta adaptar la referencia y ejecutar diagnóstico federado, selección de candidatos, despliegue, aceptación autenticada y retirada
+con evidencia. El destino autorizado de la primera referencia es únicamente `dev`. Las funciones
+completas del módulo Auth se incorporan por incrementos y no se consideran implementadas por
+esta documentación. No se acredita el cierre de 9C hasta completar su ejecución real.

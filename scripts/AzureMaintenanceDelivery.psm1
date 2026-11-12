@@ -43,8 +43,13 @@ function ConvertTo-DeliveryJobTemplate([hashtable] $Template) {
         $container.resources.cpu -ne 0.5 -or $container.resources.memory -cne '1Gi') { throw 'lifecycle.delivery.jobTemplateInvalid' }
     $environment = @{}
     foreach ($item in $container.env) {
-        if ($environment.ContainsKey($item.name) -or ($item.ContainsKey('secretRef') -and $item.secretRef) -or -not $item.ContainsKey('value')) { throw 'lifecycle.delivery.jobEnvironmentInvalid' }
-        $environment[$item.name] = [string] $item.value
+        if ($environment.ContainsKey($item.name)) { throw 'lifecycle.delivery.jobEnvironmentInvalid' }
+        if ($item.ContainsKey('secretRef') -and $item.secretRef) {
+            if ($item.ContainsKey('value') -and $item.value) { throw 'lifecycle.delivery.jobEnvironmentInvalid' }
+            $environment[$item.name] = @{ secretRef = [string] $item.secretRef }
+        }
+        elseif ($item.ContainsKey('value')) { $environment[$item.name] = [string] $item.value }
+        else { throw 'lifecycle.delivery.jobEnvironmentInvalid' }
     }
     return @{ name = 'maintenance'; image = [string] $container.image; args = @($(if ($container.ContainsKey('args') -and $null -ne $container.args) { @($container.args) } else { @() })); environment = $environment; cpu = 0.5; memory = '1Gi' }
 }
