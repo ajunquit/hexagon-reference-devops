@@ -1,0 +1,35 @@
+{
+  "$schema": "../../../../contracts/schemas/product-environment-v1.schema.json",
+  "apiVersion": "hexagon.ec/product-environment/v1",
+  "kind": "ProductEnvironment",
+  "product": "hexagon-reference",
+  "environment": "dev",
+  "components": [
+    {
+      "name": "web",
+      "repository": "ajunquit/hexagon-reference-ng",
+      "commit": "5cfa473201323cb7f1b37ad7ea73b146d3f815f9",
+      "manifests": [
+        {
+          "path": ".hexagon/frontend-hosting-requirements.json",
+          "sha256": "6c240fd1b8a7486b76d5f14b90338102829186c963b1b99ab0e2d59c5215c0ed"
+        }
+      ]
+    },
+    {
+      "name": "backend",
+      "repository": "ajunquit/hexagon-reference-dotnet-ml",
+      "commit": "1caf20ab7351b08aa8aba04680eb6b1e36bd79b1",
+      "manifests": [
+        {
+          "path": ".hexagon/messaging-requirements.json",
+          "sha256": "2d99e27f3b3d17d2ae449709145dcceca8ddcfa09868c7564d6cef9144d69d9e"
+        },
+        {
+          "path": ".hexagon/backend-hosting-requirements.json",
+          "sha256": "b26aba60cb6c5d295f6831ccc70a8c42827afb6bf84fd557f1dab2901772c63d"
+        }
+      ]
+    }
+  ]
+}

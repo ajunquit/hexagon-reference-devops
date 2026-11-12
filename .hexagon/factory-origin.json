@@ -1,0 +1,12 @@
+{
+  "apiVersion": "hexagon/factory-origin/v1",
+  "executionId": "c5c293c4-09a2-4d18-b111-212a90468b22",
+  "lockSha256": "2daabddb4533dd4703991b4cc9129fb7e224cd223ab320e34fd7cde917da7fde",
+  "factoryCommit": "82eb2c64ebe26d1bd187f3fb2003bdb0c5e7e91e",
+  "component": "devops",
+  "repository": "ajunquit/hexagon-reference-devops",
+  "template": "hexagon-template-devops",
+  "templateCommit": "32ce3778a6d0a723c9533abdaf8098d5c4fdb060",
+  "canonicalDefinition": "ajunquit/hexagon-reference-business/.hexagon/product.yaml",
+  "adopted": true
+}
