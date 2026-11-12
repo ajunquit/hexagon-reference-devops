@@ -12,7 +12,7 @@ Los repositorios .NET fijan el SDK en global.json sin roll-forward; setup-dotnet
 | --- | --- |
 | Frontend | npm ci, formato y seis guardrails, pruebas en ChromeHeadless, build de producción y bundle estático con checksum |
 | Backend | Core local fijado por commit, contratos, build sin advertencias, pruebas reales con PostgreSQL/broker efímeros, formato y modelo de cada contexto de módulo; tres archivos OCI |
-| DevOps | Contratos y fuentes, pruebas de exportación/integridad, 18 roots Terraform con fmt/validate y pruebas mock, operación real de los tres brokers y ciclo local de topología, permisos/RLS PostgreSQL; archivo OCI del bootstrap |
+| DevOps | Contratos y fuentes, pruebas de exportación/integridad, roots Terraform con fmt/validate y pruebas mock, operación real del broker y ciclo local de topología, permisos/RLS PostgreSQL; archivo OCI del bootstrap |
 
 Las pruebas de integración usan contenedores locales desechables y datos ficticios. Las pruebas
 Azure aceptan las licencias del emulador y SQL Server exclusivamente para ese entorno de prueba.
@@ -153,3 +153,17 @@ emite un plan con estado/secretos cloud ni se publican nuevas versiones de Hexag
 Referencias: [seguridad de Actions](https://docs.github.com/en/actions/reference/security/secure-use),
 [artefactos de Actions](https://github.com/actions/upload-artifact),
 [exportación OCI con .NET](https://learn.microsoft.com/en-us/dotnet/core/containers/publish-configuration).
+
+## Brokers que prueba la CI de DevOps
+
+El job `scope` (`scripts/Get-CiScope.ps1`) decide qué brokers prueba `messaging-integration`:
+
+- **Plantilla** (sin descriptores en `products/`): los tres, Azure Service Bus, AWS SNS/SQS y
+  RabbitMQ, porque todos los productos dependen de ella.
+- **Producto:** solo el proveedor que declara su backend. Cada descriptor fija el commit del backend
+  y el SHA-256 de `.hexagon/messaging-requirements.json`; `scope` lo lee con el token de lectura,
+  valida esquema, producto y hash, y toma su `provider`. Así un producto no gasta tiempo ni cómputo
+  en brokers que no usa.
+- **Backend sin mensajería** (API-only): no ejecuta pruebas de broker y `validate-build` continúa.
+
+Un manifiesto que no coincide con el descriptor detiene la CI en lugar de elegir proveedores.

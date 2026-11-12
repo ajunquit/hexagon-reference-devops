@@ -2,7 +2,7 @@
   "apiVersion": "hexagon/template-sync/v1",
   "component": "devops",
   "template": "hexagon-template-devops",
-  "templateCommit": "32ce3778a6d0a723c9533abdaf8098d5c4fdb060",
-  "previousTemplateCommit": "0c96847b5c6c6bb44fb89ef93adbe5005f01cf52",
-  "factoryCommit": "82eb2c64ebe26d1bd187f3fb2003bdb0c5e7e91e"
+  "templateCommit": "62c4959c95f99a2a3160534a0acb241aa5a869f4",
+  "previousTemplateCommit": "32ce3778a6d0a723c9533abdaf8098d5c4fdb060",
+  "factoryCommit": "8d86d45a58dd7ca0f50c2ee777e926ed0195f69b"
 }

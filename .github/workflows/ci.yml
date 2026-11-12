@@ -13,8 +13,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The template tests every messaging provider; a product only the one its backend declares.
+  scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      messaging-matrix: ${{ steps.scope.outputs.messaging-matrix }}
+      messaging-enabled: ${{ steps.scope.outputs.messaging-enabled }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select the messaging providers of this repository
+        id: scope
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.HEXAGON_APPLICATIONS_READ_TOKEN || github.token }}
+        run: ./scripts/Get-CiScope.ps1 -GitHubOutput
+
   validate-build:
-    needs: [messaging-integration, database-integration]
+    needs: [scope, messaging-integration, database-integration]
+    # An API-only product skips the broker tests; any failure or cancellation still stops the build.
+    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.database-integration.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.messaging-integration.result) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -75,18 +95,14 @@ jobs:
           retention-days: 30
 
   messaging-integration:
+    needs: scope
+    if: needs.scope.outputs.messaging-enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - provider: azure-service-bus
-            test-class: AzureRuntimeTests
-          - provider: aws-sns-sqs
-            test-class: AwsRuntimeTests
-          - provider: rabbitmq
-            test-class: RabbitMqRuntimeTests
+        include: ${{ fromJSON(needs.scope.outputs.messaging-matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -83,6 +83,9 @@ $requiredPaths = @(
     'docs/hosting-azure.md',
     'docs/adr/0010-primera-referencia-de-hosting-en-azure.md',
     'terraform/modules/hosting/azure/README.md',
+    'docs/hosting-aws.md',
+    'docs/adr/0023-referencia-de-hosting-en-aws.md',
+    'terraform/modules/hosting/aws/README.md',
     'CHANGELOG.md',
     'contracts/schemas/product-environment-v1.schema.json',
     'contracts/schemas/azure-service-bus-policy-v1.schema.json',
@@ -120,6 +123,9 @@ $requiredPaths = @(
     'scripts/Start-LocalMessaging.ps1',
     'scripts/Stop-LocalMessaging.ps1',
     'tests/Test-Contracts.ps1',
+    'scripts/Get-CiScope.ps1',
+    'scripts/CiScope.psm1',
+    'tests/Test-CiScope.ps1',
     'tests/Test-AzureServiceBusContracts.ps1',
     'tests/Test-AwsSnsSqsContracts.ps1',
     'tests/Test-RabbitMqContracts.ps1',
@@ -250,6 +256,7 @@ if ($parserErrors.Count -gt 0) {
 }
 
 & (Join-Path $repositoryRoot 'tests/Test-Contracts.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-CiScope.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-AzureServiceBusContracts.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-AwsSnsSqsContracts.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-RabbitMqContracts.ps1')
@@ -313,6 +320,7 @@ try {
         'terraform/modules/messaging/aws-sns-sqs',
         'terraform/modules/messaging/rabbitmq',
         'terraform/modules/hosting/azure',
+        'terraform/modules/hosting/aws',
         'terraform/environments/dev/hosting-azure',
         'terraform/environments/staging/hosting-azure',
         'terraform/environments/prod/hosting-azure',
@@ -349,7 +357,8 @@ try {
         'terraform/modules/messaging/azure-service-bus',
         'terraform/modules/messaging/aws-sns-sqs',
         'terraform/modules/messaging/rabbitmq',
-        'terraform/modules/hosting/azure'
+        'terraform/modules/hosting/azure',
+        'terraform/modules/hosting/aws'
     )
     foreach ($terraformTestRoot in $terraformTestRoots) {
         & terraform "-chdir=$terraformTestRoot" test -no-color
