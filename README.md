@@ -4,15 +4,11 @@ Instancia aislada para validar el ciclo 9C de las plantillas Hexagon. Administra
 `hexagon-reference`, con backend monolítico modular, frontend estático y Azure Service Bus.
 No despliega HR ni contiene información de negocio real.
 
-- Suscripción: b7fdb48a-4bf0-4c7b-9708-3d875a551936.
-- Tenant: 71747eda-0e30-46d9-a3dd-09adb3a83ff3.
 - Región inicial: eastus2.
-- Backend y frontend: repositorios privados `ajunquit/hexagon-reference-dotnet-ml` y
-  `ajunquit/hexagon-reference-ng`. El core sigue privado.
+- El backend, el frontend y el core se mantienen en repositorios privados.
 
 Este repositorio es público por autorización del propietario para usar GitHub Environments y
 sus protecciones con GitHub Free. No se versionan secretos, estados, planes ni bundles privados.
-Los IDs Azure son referencias de configuración, no credenciales.
 
 ## Preparación y ejecución
 
