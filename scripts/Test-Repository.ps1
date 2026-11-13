@@ -3,11 +3,38 @@
     Runs the repository guardrails through phase 9B without provisioning infrastructure.
 #>
 [CmdletBinding()]
-param([switch] $VerifySources)
+param([switch] $VerifySources, [string] $WorkspaceRoot)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+
+$resourceHelper = Join-Path $PSScriptRoot 'workspace_resources.py'
+$resourceCommand = Get-Command python -ErrorAction SilentlyContinue
+if (-not $resourceCommand) { $resourceCommand = Get-Command python3 -ErrorAction Stop }
+$resourcePython = $resourceCommand.Source
+& $resourcePython -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
+if ($LASTEXITCODE -ne 0) { throw 'Python 3.10 or newer is required for local resource guardrails.' }
+if (-not $WorkspaceRoot) {
+    $WorkspaceRoot = $env:HEXAGON_WORKSPACE_ROOT
+    if (-not $WorkspaceRoot) {
+        $resourceCursor = Get-Item -LiteralPath $repositoryRoot
+        while ($resourceCursor) {
+            if ((Test-Path -LiteralPath (Join-Path $resourceCursor.FullName '.tools/workspace-resources.json')) -or
+                (Test-Path -LiteralPath (Join-Path $resourceCursor.FullName '.worktrees'))) {
+                $WorkspaceRoot = $resourceCursor.FullName
+                break
+            }
+            $resourceCursor = $resourceCursor.Parent
+        }
+        if (-not $WorkspaceRoot) { $WorkspaceRoot = $repositoryRoot }
+    }
+}
+& $resourcePython $resourceHelper check --workspace-root $WorkspaceRoot
+if ($LASTEXITCODE -ne 0) { throw 'Resource budget exceeded or unverifiable. Review cleanup; do not raise limits automatically.' }
+& $resourcePython -m unittest discover -s (Join-Path $repositoryRoot 'tests/python') -v
+if ($LASTEXITCODE -ne 0) { throw 'Local resource guardrail tests failed.' }
+
 
 $requiredPaths = @(
     'contracts/schemas/platform-bootstrap-v1.schema.json',
@@ -16,6 +43,29 @@ $requiredPaths = @(
     'scripts/New-EnvironmentInventory.ps1',
     'scripts/Test-EnvironmentInventory.ps1',
     'tests/Test-EnvironmentLifecycle.ps1',
+    'tests/Test-EnvironmentLifecycleAws.ps1',
+    'tests/Test-EphemeralEnvironmentAws.ps1',
+    'tests/Test-AwsEnvironmentStore.ps1',
+    'tests/Test-AwsLifecycleResources.ps1',
+    'tests/Test-AwsLifecycleAdapter.ps1',
+    'tests/Test-AwsLifecycleStages.ps1',
+    'tests/Test-AwsApplicationDelivery.ps1',
+    'tests/Test-AwsWebDelivery.ps1',
+    'scripts/AwsApplicationDelivery.psm1',
+    'scripts/AwsWebDelivery.psm1',
+    'scripts/AwsAcceptance.psm1',
+    'scripts/AwsOciDelivery.psm1',
+    'scripts/AwsMaintenanceDelivery.psm1',
+    'scripts/Invoke-AwsEnvironment.ps1',
+    'scripts/AwsLifecycleInputs.psm1',
+    'contracts/schemas/aws-environment-result-v1.schema.json',
+    'tests/Invoke-AwsEmulatorRoots.ps1',
+    'scripts/TerraformAwsLifecycle.psm1',
+    'scripts/AwsLifecycleResources.psm1',
+    'scripts/AwsEnvironmentStore.psm1',
+    'scripts/AwsEphemeralEnvironment.psm1',
+    'examples/ephemeral-environment-aws.json',
+    'examples/environment-inventory-aws.json',
     'docs/motor-ciclo-ambiente.md',
     'scripts/Invoke-AzureEnvironment.ps1',
     'scripts/AzureEnvironmentStore.psm1',
@@ -80,11 +130,19 @@ $requiredPaths = @(
     'tests/Test-ComponentBuild.ps1',
     'contracts/schemas/application-release-v1.schema.json',
     'contracts/schemas/azure-hosting-policy-v1.schema.json',
+    'contracts/schemas/aws-hosting-policy-v1.schema.json',
+    'examples/aws-hosting-policy.json',
+    'scripts/Export-AwsHostingInputs.ps1',
     'docs/hosting-azure.md',
     'docs/adr/0010-primera-referencia-de-hosting-en-azure.md',
     'terraform/modules/hosting/azure/README.md',
     'docs/hosting-aws.md',
     'docs/adr/0023-referencia-de-hosting-en-aws.md',
+    'docs/adr/0024-credenciales-de-base-de-datos-en-aws.md',
+    'docs/adr/0025-ciclo-de-ambiente-en-aws.md',
+    'docs/ciclo-efimero-aws.md',
+    'terraform/bootstrap/aws-access/README.md',
+    'terraform/bootstrap/aws-ephemeral/README.md',
     'terraform/modules/hosting/aws/README.md',
     'CHANGELOG.md',
     'contracts/schemas/product-environment-v1.schema.json',
@@ -269,8 +327,17 @@ if ($parserErrors.Count -gt 0) {
 & (Join-Path $repositoryRoot 'tests/Test-PlatformBootstrapExecution.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-PlatformFederation.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-EnvironmentLifecycle.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-EnvironmentLifecycleAws.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-AzureEnvironmentAdapter.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-EnvironmentWorkflow.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-EphemeralEnvironmentAws.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-AwsEnvironmentStore.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-AwsLifecycleResources.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-AwsLifecycleAdapter.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-AwsLifecycleStages.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-AwsApplicationDelivery.ps1')
+& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-AwsWebDelivery.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'AWS web delivery tests failed.' }
 # Delivery HTTP fixtures must not reuse the lifecycle suites' cached module mocks.
 & pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-ApplicationDelivery.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Application delivery tests failed.' }
@@ -311,11 +378,15 @@ try {
         throw 'terraform fmt found files that need formatting.'
     }
 
+    & $resourcePython $resourceHelper check --workspace-root $WorkspaceRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Resource budget exceeded after tests. Stop before initializing providers.' }
     $terraformRoots = @(
         'terraform/bootstrap/azure',
         'terraform/bootstrap/azure-access',
         'terraform/bootstrap/azure-ephemeral',
         'terraform/bootstrap/aws',
+        'terraform/bootstrap/aws-access',
+        'terraform/bootstrap/aws-ephemeral',
         'terraform/modules/messaging/azure-service-bus',
         'terraform/modules/messaging/aws-sns-sqs',
         'terraform/modules/messaging/rabbitmq',
@@ -324,6 +395,9 @@ try {
         'terraform/environments/dev/hosting-azure',
         'terraform/environments/staging/hosting-azure',
         'terraform/environments/prod/hosting-azure',
+        'terraform/environments/dev/hosting-aws',
+        'terraform/environments/staging/hosting-aws',
+        'terraform/environments/prod/hosting-aws',
         'terraform/environments/dev/azure',
         'terraform/environments/dev/aws',
         'terraform/environments/dev/rabbitmq',
@@ -335,11 +409,9 @@ try {
         'terraform/environments/prod/rabbitmq'
     )
     foreach ($terraformRoot in $terraformRoots) {
-        & terraform "-chdir=$terraformRoot" init `
-            -backend=false `
-            -input=false `
-            -lockfile=readonly `
-            -no-color
+        & $resourcePython $resourceHelper init --workspace-root $WorkspaceRoot `
+            --root (Join-Path $repositoryRoot $terraformRoot) --cache-only -- `
+            -backend=false -input=false -lockfile=readonly -no-color
         if ($LASTEXITCODE -ne 0) {
             throw "terraform init failed for '$terraformRoot'."
         }
@@ -354,11 +426,14 @@ try {
         'terraform/bootstrap/azure-access',
         'terraform/bootstrap/azure-ephemeral',
         'terraform/bootstrap/aws',
+        'terraform/bootstrap/aws-access',
+        'terraform/bootstrap/aws-ephemeral',
         'terraform/modules/messaging/azure-service-bus',
         'terraform/modules/messaging/aws-sns-sqs',
         'terraform/modules/messaging/rabbitmq',
         'terraform/modules/hosting/azure',
-        'terraform/modules/hosting/aws'
+        'terraform/modules/hosting/aws',
+        'terraform/environments/dev/hosting-aws'
     )
     foreach ($terraformTestRoot in $terraformTestRoots) {
         & terraform "-chdir=$terraformTestRoot" test -no-color

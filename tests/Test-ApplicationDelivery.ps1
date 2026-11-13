@@ -373,66 +373,71 @@ try {
 
     # The actual CLI validates tracked metadata and protections in an isolated process scope.
     # Only GitHub reads are replaced; Azure account access must not occur in Validate/WhatIf.
-    $source = Join-Path $temporary 'source'; [IO.Directory]::CreateDirectory($source) | Out-Null
-    foreach ($relative in @('scripts', 'contracts/schemas', '.config')) {
-        $destination = Join-Path $source $relative; [IO.Directory]::CreateDirectory($destination) | Out-Null
-        Get-ChildItem -LiteralPath (Join-Path $repository $relative) -File -Force | Copy-Item -Destination $destination
-    }
-    Write-Json (Join-Path $source '.config/product.json') @{ product = $inventory.product }
-    $profile = Join-Path $source '.config/environments/dev/run-12345-1'; [IO.Directory]::CreateDirectory($profile) | Out-Null
-    $definition = Get-Content -Raw -LiteralPath (Join-Path $repository 'examples/ephemeral-environment.json') | ConvertFrom-Json -AsHashtable
-    $definition.expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
-    $definition.reviewerIds = @(); $definition.oidcPrefix = 'repo:example-owner/hexagon-template-devops'
-    $release.product = $definition.inventory.product
-    $descriptor = Get-Content -Raw -LiteralPath (Join-Path $repository 'examples/product-environment.json') | ConvertFrom-Json -AsHashtable
-    $descriptor.product = $release.product; $descriptor.components = $release.sources
-    Write-Json (Join-Path $profile 'release.json') $release; Write-Json (Join-Path $profile 'descriptor.json') $descriptor
-    $definition.inventory.releaseSha256 = Get-LifecycleFileHash (Join-Path $profile 'release.json')
-    $definition.inventory.descriptorSha256 = Get-LifecycleFileHash (Join-Path $profile 'descriptor.json')
-    $delivery.releaseSha256 = $definition.inventory.releaseSha256
-    Write-Json (Join-Path $profile 'delivery.json') $delivery; Write-Json (Join-Path $profile 'definition.json') $definition
-    foreach ($arguments in @(@('init', '-b', 'main'), @('config', 'core.autocrlf', 'false'), @('config', 'commit.gpgsign', 'false'), @('config', 'user.email', 'fixture@example.invalid'), @('config', 'user.name', 'Delivery fixture'), @('add', '.'), @('commit', '-m', 'Fixture source'))) {
-        & git -C $source @arguments *> $null
-        if ($LASTEXITCODE -ne 0) { throw 'Delivery CLI Git fixture preparation failed.' }
-    }
-    $runspace = [PowerShell]::Create()
-    $scriptBody = {
-        param($Root, $DefinitionHash, $DeliveryHash)
-        $ErrorActionPreference = 'Stop'
-        Import-Module (Join-Path $Root 'scripts/EphemeralEnvironment.psm1')
-        Import-Module (Join-Path $Root 'scripts/AzureEnvironmentStore.psm1')
-        & (Get-Module AzureEnvironmentStore) { function script:Assert-AzureLifecycleAccount { throw 'Unexpected Azure access in Validate.' } }
-        & (Get-Module EphemeralEnvironment) {
-            function script:Invoke-EphemeralGithub {
-                param($Method, $Path)
-                if ($Method -cne 'GET') { throw 'Unexpected GitHub mutation.' }
-                if ($Path -ceq 'repos/example-owner/hexagon-template-devops') { return @{ full_name = 'example-owner/hexagon-template-devops'; default_branch = 'main'; archived = $false; disabled = $false; owner = @{ login = 'example-owner'; id = 123 }; name = 'hexagon-template-devops'; id = 456 } }
-                if ($Path -like '*/actions/oidc/customization/sub') { return @{ use_default = $true; sub_claim_prefix = 'repo:example-owner/hexagon-template-devops' } }
-                if ($Path -like '*/deployment-branch-policies*') { return @{ total_count = 1; branch_policies = @(@{ name = 'main'; type = 'branch' }) } }
-                if ($Path -like '*/variables*') { throw 'Unnecessary privileged GitHub API request.' }
-                return @{ can_admins_bypass = $false; deployment_branch_policy = @{ protected_branches = $false; custom_branch_policies = $true }; protection_rules = @(@{ type = 'branch_policy' }) }
+    # Both providers go through the same entry point; the provider comes from the tracked target.
+    foreach ($case in @(@{ provider = 'azure'; example = 'ephemeral-environment.json' }, @{ provider = 'aws'; example = 'ephemeral-environment-aws.json' })) {
+        $source = Join-Path $temporary "source-$($case.provider)"; [IO.Directory]::CreateDirectory($source) | Out-Null
+        foreach ($relative in @('scripts', 'contracts/schemas', '.config')) {
+            $destination = Join-Path $source $relative; [IO.Directory]::CreateDirectory($destination) | Out-Null
+            Get-ChildItem -LiteralPath (Join-Path $repository $relative) -File -Force | Copy-Item -Destination $destination
+        }
+        Write-Json (Join-Path $source '.config/product.json') @{ product = $inventory.product }
+        $profile = Join-Path $source '.config/environments/dev/run-12345-1'; [IO.Directory]::CreateDirectory($profile) | Out-Null
+        $definition = Get-Content -Raw -LiteralPath (Join-Path $repository "examples/$($case.example)") | ConvertFrom-Json -AsHashtable
+        $definition.expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+        $definition.reviewerIds = @(); $definition.oidcPrefix = 'repo:example-owner/hexagon-template-devops'
+        $release.product = $definition.inventory.product
+        $descriptor = Get-Content -Raw -LiteralPath (Join-Path $repository 'examples/product-environment.json') | ConvertFrom-Json -AsHashtable
+        $descriptor.product = $release.product; $descriptor.components = $release.sources
+        Write-Json (Join-Path $profile 'release.json') $release; Write-Json (Join-Path $profile 'descriptor.json') $descriptor
+        $definition.inventory.releaseSha256 = Get-LifecycleFileHash (Join-Path $profile 'release.json')
+        $definition.inventory.descriptorSha256 = Get-LifecycleFileHash (Join-Path $profile 'descriptor.json')
+        $delivery.releaseSha256 = $definition.inventory.releaseSha256
+        Write-Json (Join-Path $profile 'delivery.json') $delivery; Write-Json (Join-Path $profile 'definition.json') $definition
+        foreach ($arguments in @(@('init', '-b', 'main'), @('config', 'core.autocrlf', 'false'), @('config', 'commit.gpgsign', 'false'), @('config', 'user.email', 'fixture@example.invalid'), @('config', 'user.name', 'Delivery fixture'), @('add', '.'), @('commit', '-m', 'Fixture source'))) {
+            & git -C $source @arguments *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'Delivery CLI Git fixture preparation failed.' }
+        }
+        $runspace = [PowerShell]::Create()
+        $scriptBody = {
+            param($Root, $DefinitionHash, $DeliveryHash)
+            $ErrorActionPreference = 'Stop'
+            Import-Module (Join-Path $Root 'scripts/EphemeralEnvironment.psm1')
+            Import-Module (Join-Path $Root 'scripts/AzureEnvironmentStore.psm1')
+            & (Get-Module AzureEnvironmentStore) { function script:Assert-AzureLifecycleAccount { throw 'Unexpected Azure access in Validate.' } }
+            & (Get-Module EphemeralEnvironment) {
+                function script:Invoke-EphemeralGithub {
+                    param($Method, $Path)
+                    if ($Method -cne 'GET') { throw 'Unexpected GitHub mutation.' }
+                    if ($Path -ceq 'repos/example-owner/hexagon-template-devops') { return @{ full_name = 'example-owner/hexagon-template-devops'; default_branch = 'main'; archived = $false; disabled = $false; owner = @{ login = 'example-owner'; id = 123 }; name = 'hexagon-template-devops'; id = 456 } }
+                    if ($Path -like '*/actions/oidc/customization/sub') { return @{ use_default = $true; sub_claim_prefix = 'repo:example-owner/hexagon-template-devops' } }
+                    if ($Path -like '*/deployment-branch-policies*') { return @{ total_count = 1; branch_policies = @(@{ name = 'main'; type = 'branch' }) } }
+                    if ($Path -like '*/variables*') { throw 'Unnecessary privileged GitHub API request.' }
+                    return @{ can_admins_bypass = $false; deployment_branch_policy = @{ protected_branches = $false; custom_branch_policies = $true }; protection_rules = @(@{ type = 'branch_policy' }) }
+                }
             }
+            $names = @('GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REF', 'GITHUB_REPOSITORY', 'GITHUB_WORKFLOW_REF', 'GITHUB_STEP_SUMMARY'); $saved = @{}
+            foreach ($key in $names) { $saved[$key] = [Environment]::GetEnvironmentVariable($key) }
+            try {
+                $env:GITHUB_ACTIONS = 'true'; $env:GITHUB_EVENT_NAME = 'workflow_dispatch'; $env:GITHUB_REF = 'refs/heads/main'; $env:GITHUB_REPOSITORY = 'example-owner/hexagon-template-devops'
+                $env:GITHUB_WORKFLOW_REF = 'example-owner/hexagon-template-devops/.github/workflows/delivery.yml@refs/heads/main'; $env:GITHUB_STEP_SUMMARY = $null
+                & (Join-Path $Root 'scripts/Invoke-ApplicationDelivery.ps1') -Environment dev -InstanceId run-12345-1 -DefinitionSha256 $DefinitionHash -DeliverySha256 $DeliveryHash -Stage Validate
+            }
+            finally { foreach ($key in $names) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) } }
         }
-        $names = @('GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REF', 'GITHUB_REPOSITORY', 'GITHUB_WORKFLOW_REF', 'GITHUB_STEP_SUMMARY'); $saved = @{}
-        foreach ($key in $names) { $saved[$key] = [Environment]::GetEnvironmentVariable($key) }
         try {
-            $env:GITHUB_ACTIONS = 'true'; $env:GITHUB_EVENT_NAME = 'workflow_dispatch'; $env:GITHUB_REF = 'refs/heads/main'; $env:GITHUB_REPOSITORY = 'example-owner/hexagon-template-devops'
-            $env:GITHUB_WORKFLOW_REF = 'example-owner/hexagon-template-devops/.github/workflows/delivery.yml@refs/heads/main'; $env:GITHUB_STEP_SUMMARY = $null
-            & (Join-Path $Root 'scripts/Invoke-ApplicationDelivery.ps1') -Environment dev -InstanceId run-12345-1 -DefinitionSha256 $DefinitionHash -DeliverySha256 $DeliveryHash -Stage Validate
+            [void] $runspace.AddScript($scriptBody.ToString()).AddArgument($source).AddArgument((Get-LifecycleFileHash (Join-Path $profile 'definition.json'))).AddArgument((Get-LifecycleFileHash (Join-Path $profile 'delivery.json')))
+            $output = $runspace.Invoke()
+            if ($runspace.HadErrors) {
+                $diagnostic = @($runspace.Runspace.SessionStateProxy.GetVariable('Error')) | Select-Object -First 1
+                throw "Delivery CLI fixture failed: $($output -join '') $($diagnostic.Exception.Message) $($diagnostic.ScriptStackTrace)"
+            }
+            $validated = $output -join "`n" | ConvertFrom-Json
+            Assert-True ($validated.status -ceq 'Validated' -and $validated.details.githubEnvironment -ceq 'dev-run-12345-1' -and $validated.details.provider -ceq $case.provider) "Delivery CLI did not validate tracked metadata: $($output -join '')"
+            if ($case.provider -ceq 'aws') { Assert-True ($validated.details.accountId -ceq $definition.inventory.target.accountId -and $validated.details.roleArn -ceq $definition.inventory.target.roleArn -and $validated.details.region -ceq $definition.inventory.target.region) 'The AWS target must come from the tracked definition.' }
+            else { Assert-True ($validated.details.clientId -ceq $definition.inventory.target.clientId) 'The Azure target must come from the tracked definition.' }
         }
-        finally { foreach ($key in $names) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) } }
+        finally { $runspace.Dispose() }
     }
-    try {
-        [void] $runspace.AddScript($scriptBody.ToString()).AddArgument($source).AddArgument((Get-LifecycleFileHash (Join-Path $profile 'definition.json'))).AddArgument((Get-LifecycleFileHash (Join-Path $profile 'delivery.json')))
-        $output = $runspace.Invoke()
-        if ($runspace.HadErrors) {
-            $diagnostic = @($runspace.Runspace.SessionStateProxy.GetVariable('Error')) | Select-Object -First 1
-            throw "Delivery CLI fixture failed: $($output -join '') $($diagnostic.Exception.Message) $($diagnostic.ScriptStackTrace)"
-        }
-        $validated = $output -join "`n" | ConvertFrom-Json
-        Assert-True ($validated.status -ceq 'Validated' -and $validated.details.githubEnvironment -ceq 'dev-run-12345-1') "Delivery CLI did not validate tracked metadata: $($output -join '')"
-    }
-    finally { $runspace.Dispose() }
 }
 finally {
     foreach ($key in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable($key, $savedEnvironment[$key]) }

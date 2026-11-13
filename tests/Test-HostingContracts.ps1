@@ -104,3 +104,44 @@ if ($bound.messaging_enabled -ne $false) { throw 'Messaging-free binding changed
 $context.inventory.roots += @{ id = 'messaging' }
 Assert-Rejected { & $delivery { param($context, $inputs) Get-AzureDeliveryBoundInputs $context $inputs } $context $simple } 'messagingUnexpected'
 Write-Host 'API-only hosting and delivery checks passed without a messaging root.'
+
+$awsSchema = Join-Path $root 'contracts/schemas/aws-hosting-policy-v1.schema.json'
+function Test-AwsPolicy($Value) { return ($Value | ConvertTo-Json -Depth 40 | Test-Json -SchemaFile $awsSchema -ErrorAction SilentlyContinue) }
+$awsPolicy = Read-HostingContract -Path (Join-Path $root 'examples/aws-hosting-policy.json') -Schema 'aws-hosting-policy-v1'
+$release = Read-HostingContract -Path $releasePath -Schema 'application-release-v1'
+$aws = ConvertTo-AwsHostingInput $descriptor $release $awsPolicy $backend $frontend
+$ecr = '123456789012.dkr.ecr.us-east-1.amazonaws.com/example-dev-0001'
+if ($aws.workloads['hexagon-example-api'].image -cne "$ecr/hexagon-example-api@sha256:$('d' * 64)" -or $aws.bootstrap_image -cne "$ecr/database-bootstrap@sha256:$('f' * 64)") {
+    throw 'AWS images must keep their digest in the ECR repositories of the environment prefix.'
+}
+if ($aws.account_id -cne '123456789012' -or $aws.region -cne 'us-east-1' -or $aws.workloads['hexagon-example-api'].cpu -ne 256 -or $aws.workloads['hexagon-example-api'].memory -ne 512 -or $aws.maintenance_jobs_enabled -or $aws.application_rollout_enabled -or $aws.Contains('database_instance_class')) {
+    throw 'AWS inputs must pin the account, keep the declared Fargate sizes, leave unset sizes to the module and start without rollout.'
+}
+foreach ($environment in @('dev', 'staging', 'prod')) {
+    $declared = @([regex]::Matches((Get-Content -Raw (Join-Path $root "terraform/environments/$environment/hosting-aws/variables.tf")), '(?m)^variable "([a-z_]+)"') | ForEach-Object { $_.Groups[1].Value })
+    $undeclared = @(@($aws.Keys) + @('keycloak', 'keycloak_rollout_enabled', 'messaging_enabled') | Where-Object { $_ -cnotin $declared })
+    if ($undeclared.Count -gt 0) { throw "The $environment hosting-aws root does not declare: $($undeclared -join ', ')." }
+}
+$awsIntegrated = ($awsPolicy | ConvertTo-Json -Depth 40) | ConvertFrom-Json -AsHashtable
+$awsIntegrated.infrastructure.auth.authority = $null
+$awsIntegrated.infrastructure.keycloak = @{ image = "quay.io/keycloak/keycloak@sha256:$('a' * 64)"; realm = 'hexagon'; bootstrap_user = 'bootstrap' }
+if (-not (Test-AwsPolicy $awsIntegrated)) { throw 'Valid integrated identity AWS policy was rejected.' }
+$awsIdentity = ConvertTo-AwsHostingInput $descriptor $release $awsIntegrated $backend $frontend
+if ($awsIdentity.keycloak_rollout_enabled -or $null -ne $awsIdentity.auth.authority) { throw 'Integrated identity on AWS must start without rollout and derive its issuer from CloudFront.' }
+$awsIntegrated.infrastructure.keycloak.bootstrap_password = @{ secret_arn = 'arn:aws:secretsmanager:us-east-1:123456789012:secret:x' }
+if (Test-AwsPolicy $awsIntegrated) { throw 'Keycloak credentials on AWS are created by hosting, never declared in the policy.' }
+$awsIntegrated.infrastructure.keycloak.Remove('bootstrap_password'); $awsIntegrated.environment = 'staging'
+if (Test-AwsPolicy $awsIntegrated) { throw 'Integrated identity on AWS is restricted to dev.' }
+$awsInvalid = ($awsPolicy | ConvertTo-Json -Depth 40) | ConvertFrom-Json -AsHashtable
+$awsInvalid.workloads['hexagon-example-api'].cpu = 0.25
+if (Test-AwsPolicy $awsInvalid) { throw 'AWS workloads must use Fargate CPU units.' }
+$awsInvalid.workloads['hexagon-example-api'].cpu = 256
+$awsInvalid.workloads['hexagon-example-api'].secret_references = @{ ExternalApi__ApiKey = @{ secret_uri = 'https://examplevault.vault.azure.net/secrets/key' } }
+if (Test-AwsPolicy $awsInvalid) { throw 'AWS credentials must be Secrets Manager references.' }
+$awsInvalid = ($awsPolicy | ConvertTo-Json -Depth 40) | ConvertFrom-Json -AsHashtable
+$awsInvalid.infrastructure.availability_zones = @('us-east-1a')
+if (Test-AwsPolicy $awsInvalid) { throw 'The AWS reference requires two availability zones.' }
+$release.artifacts.backend['hexagon-example-api'] = 'exampledev0001.azurecr.io/hexagon-example-api:latest'
+Assert-Rejected { ConvertTo-AwsHostingInput $descriptor $release $awsPolicy $backend $frontend } 'pinned by digest'
+& (Join-Path $root 'scripts/Export-AwsHostingInputs.ps1') -Descriptor 'unused' -Release 'unused' -Policy 'unused' -Output (Join-Path ([IO.Path]::GetTempPath()) 'unused.auto.tfvars.json') -WhatIf
+Write-Host 'AWS hosting contract checks passed.'

@@ -92,6 +92,10 @@ run "keycloak_database_is_prepared_before_keycloak_runs" {
     error_message = "The identity database must be prepared before Keycloak starts."
   }
   assert {
+    condition     = jsondecode(aws_ecs_task_definition.maintenance["keycloak-database"].container_definitions)[0].secrets[0].name == "HEXAGON_DATABASE_MAINTENANCE"
+    error_message = "The identity database is prepared by the maintenance login, which owns the product database."
+  }
+  assert {
     condition     = toset(keys(aws_secretsmanager_secret.keycloak)) == toset(["database", "bootstrap"]) && length(aws_iam_role_policy.execution_secrets["maintenance"].policy) > 0
     error_message = "Keycloak passwords live in empty Secrets Manager containers that the preparation task fills."
   }

@@ -36,3 +36,7 @@ secrets/
 .DS_Store
 Thumbs.db
 /acceptance/node_modules/
+
+# Python tooling caches
+__pycache__/
+*.pyc

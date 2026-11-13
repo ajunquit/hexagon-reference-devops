@@ -54,16 +54,18 @@ variable "database_connection_name" {
   }
 }
 variable "database_instance_class" {
-  type    = string
-  default = "db.t4g.micro"
+  type     = string
+  nullable = false
+  default  = "db.t4g.micro"
   validation {
     condition     = can(regex("^db[.][a-z0-9]+[.][a-z0-9]+$", var.database_instance_class))
     error_message = "Invalid RDS instance class."
   }
 }
 variable "database_storage_gb" {
-  type    = number
-  default = 20
+  type     = number
+  nullable = false
+  default  = 20
   validation {
     condition     = var.database_storage_gb >= 20 && floor(var.database_storage_gb) == var.database_storage_gb
     error_message = "RDS PostgreSQL requires at least 20 GB."
@@ -72,6 +74,7 @@ variable "database_storage_gb" {
 variable "database_multi_az" {
   description = "A standby in a second zone. Off by default: it doubles the cost of the database."
   type        = bool
+  nullable    = false
   default     = false
 }
 variable "messaging_enabled" {
@@ -150,14 +153,24 @@ variable "maintenance_jobs_enabled" {
   default     = false
 }
 variable "log_retention_days" {
-  type    = number
-  default = 7
+  type     = number
+  nullable = false
+  default  = 7
   validation {
     condition     = contains([1, 3, 5, 7, 14, 30, 60, 90], var.log_retention_days)
     error_message = "Use a supported CloudWatch retention of at most 90 days."
   }
 }
 variable "tags" { type = map(string) }
+variable "workload_boundary_arn" {
+  description = "Permissions boundary of aws-access, required on every role inside a reservation (ADR 0025)."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.workload_boundary_arn == null || can(regex("^arn:aws:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_-]+$", var.workload_boundary_arn))
+    error_message = "Use the workload boundary ARN of aws-access."
+  }
+}
 
 variable "acceptance_fixture" {
   description = "Optional isolated initial tenants for ephemeral acceptance; never an identity credential."

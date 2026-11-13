@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hexagon Handoff"
+  short_description: "Cierra el trabajo y prepara un relevo verificable"
+  default_prompt: "Usa $hexagon-handoff para actualizar el cierre y los pendientes con evidencia, de modo que otro agente pueda continuar."

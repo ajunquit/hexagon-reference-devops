@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object", "additionalProperties": false,
-  "required": ["apiVersion", "inventory", "location", "oidcPrefix", "bootstrapContainer", "expiresAt", "reviewerIds", "protectedResourceGroups"],
+  "required": ["apiVersion", "inventory", "oidcPrefix", "expiresAt", "reviewerIds"],
   "properties": {
     "apiVersion": { "const": "hexagon.ec/ephemeral-environment/v1" },
     "inventory": { "type": "object" },
@@ -10,6 +10,20 @@
     "bootstrapContainer": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" },
     "expiresAt": { "type": "integer", "minimum": 1 },
     "reviewerIds": { "type": "array", "maxItems": 6, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
-    "protectedResourceGroups": { "type": "array", "minItems": 2, "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^rg-[a-z0-9-]{1,76}$" } }
+    "protectedResourceGroups": { "type": "array", "minItems": 2, "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^rg-[a-z0-9-]{1,76}$" } },
+    "namePrefixBase": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,10}[a-z0-9]$" },
+    "githubOidcProviderArn": { "type": "string", "pattern": "^arn:aws:iam::[0-9]{12}:oidc-provider/token[.]actions[.]githubusercontent[.]com$" },
+    "workloadBoundaryArn": { "type": "string", "pattern": "^arn:aws:iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_-]{1,128}$" },
+    "stateKmsKeyArn": { "type": "string", "pattern": "^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$" },
+    "protectedNamePrefixes": { "type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,18}$" } }
+  },
+  "if": { "properties": { "inventory": { "properties": { "target": { "required": ["accountId"] } } } } },
+  "then": {
+    "required": ["namePrefixBase", "githubOidcProviderArn", "workloadBoundaryArn", "stateKmsKeyArn", "protectedNamePrefixes"],
+    "not": { "anyOf": [{ "required": ["location"] }, { "required": ["bootstrapContainer"] }, { "required": ["protectedResourceGroups"] }] }
+  },
+  "else": {
+    "required": ["location", "bootstrapContainer", "protectedResourceGroups"],
+    "not": { "anyOf": [{ "required": ["namePrefixBase"] }, { "required": ["githubOidcProviderArn"] }, { "required": ["workloadBoundaryArn"] }, { "required": ["stateKmsKeyArn"] }, { "required": ["protectedNamePrefixes"] }] }
   }
 }

@@ -18,7 +18,7 @@
       "additionalProperties": {
         "type": "object", "additionalProperties": false, "required": ["image", "digest", "archiveSha256"],
         "properties": {
-          "image": { "type": "string", "pattern": "^[a-z0-9]{5,50}[.]azurecr[.]io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$" },
+          "image": { "type": "string", "anyOf": [{ "pattern": "^[a-z0-9]{5,50}[.]azurecr[.]io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$" }, { "pattern": "^[0-9]{12}[.]dkr[.]ecr[.][a-z0-9-]+[.]amazonaws[.]com/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$" }] },
           "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
           "archiveSha256": { "$ref": "#/$defs/hash" }
         }
@@ -26,7 +26,7 @@
     },
     "jobs": {
       "type": "object", "additionalProperties": false,
-      "properties": { "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "keycloak-database": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" } }
+      "properties": { "database-credentials": { "$ref": "#/$defs/job" }, "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "keycloak-database": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" } }
     },
     "maintenanceSha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
     "plan": {
@@ -66,7 +66,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["jobId", "attemptId", "templateSha256", "executionId", "status"],
       "properties": {
-        "jobId": { "type": "string", "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[A-Za-z0-9._-]+/providers/Microsoft[.]App/jobs/[a-z0-9-]+$" },
+        "jobId": { "type": "string", "anyOf": [{ "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[A-Za-z0-9._-]+/providers/Microsoft[.]App/jobs/[a-z0-9-]+$" }, { "pattern": "^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+$" }] },
         "attemptId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
         "templateSha256": { "$ref": "#/$defs/hash" },
         "executionId": { "type": ["string", "null"] },

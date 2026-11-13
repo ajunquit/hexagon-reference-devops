@@ -75,6 +75,24 @@
         "githubEnvironment": {
           "type": "string",
           "pattern": "^(dev|staging)-run-[1-9][0-9]*-[1-9][0-9]*$"
+        },
+        "provider": {
+          "enum": [
+            "azure",
+            "aws"
+          ]
+        },
+        "accountId": {
+          "type": "string",
+          "pattern": "^[0-9]{12}$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$"
+        },
+        "roleArn": {
+          "type": "string",
+          "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_-]{1,64}$"
         }
       }
     },

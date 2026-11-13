@@ -59,3 +59,19 @@ variable "consumers" {
     })
   }))
 }
+
+variable "instance_id" {
+  description = "Instance of the lifecycle: persistent, or the run-ID-attempt of an ephemeral reservation."
+  type        = string
+  default     = "persistent"
+  validation {
+    condition     = can(regex("^(persistent|run-[1-9][0-9]{0,19}-[1-9][0-9]{0,3})$", var.instance_id))
+    error_message = "Use persistent or run-ID-attempt."
+  }
+}
+
+variable "name_prefix" {
+  description = "Short prefix of the instance (ADR 0025); null outside a reservation."
+  type        = string
+  default     = null
+}

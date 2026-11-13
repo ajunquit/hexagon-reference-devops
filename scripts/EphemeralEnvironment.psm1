@@ -4,6 +4,7 @@ Import-Module (Join-Path $PSScriptRoot 'EnvironmentLifecycle.psm1')
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentSnapshot.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.Execution.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AwsEphemeralEnvironment.psm1')
 
 function Read-EphemeralEnvironment([string] $Path) {
     $root = Split-Path -Parent $PSScriptRoot
@@ -14,6 +15,7 @@ function Read-EphemeralEnvironment([string] $Path) {
     Assert-EnvironmentInitialInventory $value.inventory
     $inventory = $value.inventory
     if ($inventory.components.Count -ne 2 -or $inventory.components -cnotcontains 'web' -or $inventory.components -cnotcontains 'backend') { throw 'lifecycle.ephemeral.referenceComponentsUnsupported' }
+    if ($inventory.target.ContainsKey('accountId')) { Assert-AwsEphemeralDefinition $value; return $value }
     if ($inventory.instance.kind -cne 'Ephemeral' -or $inventory.environment -ceq 'prod' -or $inventory.dataPolicy -cne 'DeleteEphemeral' -or
         $inventory.target.container -cne "tfstate-$($inventory.instance.id)-$($inventory.environment)" -or $value.bootstrapContainer -ceq $inventory.target.container -or
         ($value.oidcPrefix -replace '^repo:', '' -replace '@[0-9]+', '') -cne $inventory.iac.repository -or
@@ -79,6 +81,13 @@ function Assert-EphemeralRepository([hashtable] $Definition) {
         $oidc.use_default -ne $true -or $oidc.sub_claim_prefix -cnotin $prefixes -or $oidc.sub_claim_prefix -cne $Definition.oidcPrefix) { throw 'lifecycle.ephemeral.repositoryMismatch' }
 }
 
+# The variables a GitHub Environment holds for the federated deployment identity of its cloud.
+function Get-EphemeralGithubBindings([hashtable] $Definition) {
+    if ($Definition.inventory.target.ContainsKey('accountId')) { return Get-AwsEphemeralGithubBindings $Definition }
+    $target = $Definition.inventory.target
+    return [ordered] @{ AZURE_CLIENT_ID = $target.clientId; AZURE_TENANT_ID = $target.tenantId; AZURE_SUBSCRIPTION_ID = $target.subscriptionId }
+}
+
 function Get-EphemeralGithubProtection {
     param([hashtable] $Definition, [switch] $SkipBindings)
     $inventory = $Definition.inventory
@@ -99,7 +108,7 @@ function Get-EphemeralGithubProtection {
     if (-not $SkipBindings) {
         $variables = Invoke-EphemeralGithub GET "$base/variables?per_page=100" $null
         if ($variables.total_count -ne @($variables.variables).Count) { throw 'lifecycle.ephemeral.githubIncomplete' }
-        foreach ($pair in @{ AZURE_CLIENT_ID = $inventory.target.clientId; AZURE_TENANT_ID = $inventory.target.tenantId; AZURE_SUBSCRIPTION_ID = $inventory.target.subscriptionId }.GetEnumerator()) {
+        foreach ($pair in (Get-EphemeralGithubBindings $Definition).GetEnumerator()) {
             $matches = @($variables.variables | Where-Object name -CEQ $pair.Key)
             if ($matches.Count -ne 1 -or $matches[0].value -cne $pair.Value) { throw 'lifecycle.ephemeral.githubVariableDrift' }
         }
@@ -132,7 +141,7 @@ function Set-EphemeralGithubProtection {
     if (@($policies.branch_policies).Count -eq 0) { Invoke-EphemeralGithub POST "$base/deployment-branch-policies" @{ name = 'main'; type = 'branch' } | Out-Null }
     $existing = Invoke-EphemeralGithub GET "$base/variables?per_page=100" $null
     if ($existing.total_count -ne @($existing.variables).Count) { throw 'lifecycle.ephemeral.githubIncomplete' }
-    foreach ($pair in @{ AZURE_CLIENT_ID = $inventory.target.clientId; AZURE_TENANT_ID = $inventory.target.tenantId; AZURE_SUBSCRIPTION_ID = $inventory.target.subscriptionId }.GetEnumerator()) {
+    foreach ($pair in (Get-EphemeralGithubBindings $Definition).GetEnumerator()) {
         $matches = @($existing.variables | Where-Object name -CEQ $pair.Key)
         if ($matches.Count -eq 1 -and $matches[0].value -ceq $pair.Value) { continue }
         if ($matches.Count -eq 1) { Invoke-EphemeralGithub PATCH "$base/variables/$($pair.Key)" @{ name = $pair.Key; value = $pair.Value } | Out-Null }
@@ -210,4 +219,4 @@ function Assert-EphemeralReservationReview([hashtable] $Review, [string] $Sha256
     foreach ($name in $names) { if ((Get-LifecycleFileHash (Join-Path $Directory $name)) -cne $Review.files[$name]) { throw 'lifecycle.ephemeral.reviewChanged' } }
 }
 
-Export-ModuleMember -Function Read-EphemeralEnvironment, Assert-EphemeralSelection, New-EphemeralWorkspace, Resolve-EphemeralWorkspacePath, Invoke-EphemeralGithub, Assert-EphemeralRepository, Get-EphemeralGithubProtection, Set-EphemeralGithubProtection, Assert-EphemeralTrackedDefinition, Assert-EphemeralReservationPlan, Assert-EphemeralReservationReview, Assert-EphemeralBootstrapStorage, Test-EphemeralIsolation
+Export-ModuleMember -Function Read-EphemeralEnvironment, Get-EphemeralGithubBindings, Assert-EphemeralSelection, New-EphemeralWorkspace, Resolve-EphemeralWorkspacePath, Invoke-EphemeralGithub, Assert-EphemeralRepository, Get-EphemeralGithubProtection, Set-EphemeralGithubProtection, Assert-EphemeralTrackedDefinition, Assert-EphemeralReservationPlan, Assert-EphemeralReservationReview, Assert-EphemeralBootstrapStorage, Test-EphemeralIsolation

@@ -1,0 +1,67 @@
+{
+  "apiVersion": "hexagon.ec/environment-inventory/v1",
+  "kind": "EnvironmentInventory",
+  "product": "hexagon-template",
+  "environment": "dev",
+  "instance": {
+    "kind": "Ephemeral",
+    "id": "run-12345-1"
+  },
+  "target": {
+    "accountId": "123456789012",
+    "region": "us-east-1",
+    "roleArn": "arn:aws:iam::123456789012:role/hexagon-template-dev-run-12345-1-deploy",
+    "stateBucket": "hexagon-template-tfstate-123456789012",
+    "stateKmsKeyArn": "arn:aws:kms:us-east-1:123456789012:key/11111111-2222-3333-4444-555555555555"
+  },
+  "iac": {
+    "repository": "example-owner/hexagon-template-devops",
+    "commit": "1111111111111111111111111111111111111111",
+    "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "descriptorSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "releaseSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "components": [
+    "web",
+    "backend"
+  ],
+  "dataPolicy": "DeleteEphemeral",
+  "revision": 0,
+  "applicationVerified": false,
+  "roots": [
+    {
+      "id": "hosting",
+      "adapter": "AwsHosting",
+      "dependsOn": [],
+      "namePrefix": "tpl-dev-e1c8fa",
+      "stateKey": "hexagon-template/dev/run-12345-1/hosting.tfstate",
+      "configurationSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "inputsSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "Pending",
+      "lastOperation": null,
+      "stateLineage": null,
+      "stateSerial": 0,
+      "resources": [],
+      "plan": null,
+      "errorCode": null
+    },
+    {
+      "id": "messaging",
+      "adapter": "AwsSnsSqs",
+      "dependsOn": [
+        "hosting"
+      ],
+      "namePrefix": "tpl-dev-e1c8fa",
+      "stateKey": "hexagon-template/dev/run-12345-1/messaging.tfstate",
+      "configurationSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "inputsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "status": "Pending",
+      "lastOperation": null,
+      "stateLineage": null,
+      "stateSerial": 0,
+      "resources": [],
+      "plan": null,
+      "errorCode": null
+    }
+  ]
+}

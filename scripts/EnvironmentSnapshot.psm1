@@ -9,7 +9,11 @@ function Get-SnapshotHash([object] $Value) {
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
 }
 
-function Get-SnapshotRootPaths([string] $Id, [string] $Environment) {
+function Get-SnapshotRootPaths([string] $Id, [string] $Environment, [string] $Adapter = '') {
+    # AWS roots (ADR 0025); Azure stays the default for the adapters that existed before.
+    if ($Adapter -ceq 'AwsHosting' -and $Id -ceq 'hosting') { return @("terraform/environments/$Environment/hosting-aws", 'terraform/modules/hosting/aws') }
+    if ($Adapter -ceq 'AwsSnsSqs' -and $Id -ceq 'messaging') { return @("terraform/environments/$Environment/aws", 'terraform/modules/messaging/aws-sns-sqs') }
+    if ($Adapter -like 'Aws*') { throw 'lifecycle.snapshotRootUnknown' }
     if ($Id -ceq 'hosting') { return @("terraform/environments/$Environment/hosting-azure", 'terraform/modules/hosting/azure') }
     if ($Id -ceq 'messaging') { return @("terraform/environments/$Environment/azure", 'terraform/modules/messaging/azure-service-bus') }
     throw 'lifecycle.snapshotRootUnknown'
@@ -30,7 +34,7 @@ function Assert-LifecycleGitSource([hashtable] $Inventory, [string] $Repository,
 }
 
 function Get-LifecycleConfigurationFiles([hashtable] $Inventory, [string] $Repository) {
-    $prefixes = @($Inventory.roots | ForEach-Object { Get-SnapshotRootPaths $_.id $Inventory.environment } | Sort-Object -Unique)
+    $prefixes = @($Inventory.roots | ForEach-Object { Get-SnapshotRootPaths $_.id $Inventory.environment $_.adapter } | Sort-Object -Unique)
     $result = Invoke-LifecycleCommand git (@('ls-tree', '-r', '--name-only', $Inventory.iac.commit, '--') + $prefixes) $Repository -TimeoutSeconds 30
     if ($result.exitCode -ne 0) { throw 'lifecycle.snapshotSourceUnavailable' }
     return @($result.text -split "`n" | Where-Object { $_ -match '[.]tf$|/[.]terraform[.]lock[.]hcl$' } | Sort-Object)
@@ -40,7 +44,10 @@ function Assert-LifecycleInputs([hashtable] $Inventory, [hashtable] $Root, [byte
     if ($Bytes.Length -gt 1048576) { throw 'lifecycle.snapshotInputsInvalid' }
     try { $text = [Text.UTF8Encoding]::new($false, $true).GetString($Bytes); $value = $text | ConvertFrom-Json -AsHashtable -Depth 32 }
     catch { throw 'lifecycle.snapshotInputsInvalid' }
-    if ($value.product -cne $Inventory.product -or $value.environment -cne $Inventory.environment -or $value.resource_group_name -cne $Root.resourceGroup -or
+    # Azure inputs name their resource group; AWS inputs, the short prefix of the reservation (ADR 0025).
+    $scoped = $(if ($Root.ContainsKey('namePrefix')) { $Root.id -ceq 'messaging' -and $Inventory.instance.kind -cne 'Ephemeral' -and -not $value.ContainsKey('name_prefix') -or $value.name_prefix -ceq $Root.namePrefix }
+        else { $value.resource_group_name -ceq $Root.resourceGroup })
+    if ($value.product -cne $Inventory.product -or $value.environment -cne $Inventory.environment -or -not $scoped -or
         $text -match '(?i)SharedAccessKey=|Password=|-----BEGIN [A-Z ]*PRIVATE KEY-----|"(?:client_secret|clientSecret|password|accessToken)"\s*:\s*"') { throw 'lifecycle.snapshotInputsInvalid' }
 }
 
@@ -56,7 +63,7 @@ function New-LifecycleSnapshot {
         $contents[$path] = $bytes; $files[$path] = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
     }
     foreach ($root in $Inventory.roots) {
-        $paths = Get-SnapshotRootPaths $root.id $Inventory.environment
+        $paths = Get-SnapshotRootPaths $root.id $Inventory.environment $root.adapter
         foreach ($name in @('main.tf', 'variables.tf', 'providers.tf', 'versions.tf', 'outputs.tf', '.terraform.lock.hcl')) {
             if (-not $files.ContainsKey("$($paths[0])/$name")) { throw 'lifecycle.snapshotConfigurationMissing' }
         }
@@ -133,7 +140,7 @@ function Read-LifecycleSnapshot {
     foreach ($name in $expected) { if (-not $manifest.files.ContainsKey($name)) { throw 'lifecycle.snapshotConfigurationMissing' } }
     if ($manifest.roots.Count -ne $Inventory.roots.Count) { throw 'lifecycle.snapshotRootMismatch' }
     foreach ($root in $Inventory.roots) {
-        $paths = Get-SnapshotRootPaths $root.id $Inventory.environment
+        $paths = Get-SnapshotRootPaths $root.id $Inventory.environment $root.adapter
         $map = @{}; foreach ($name in $expected) { if (@($paths | Where-Object { $name.StartsWith("$_/", [StringComparison]::Ordinal) }).Count -gt 0) { $map[$name] = $manifest.files[$name] } }
         $entry = $manifest.roots[$root.id]
         if ($entry.directory -cne $paths[0] -or $entry.inputs -cne "inputs/$($root.id).tfvars.json" -or $entry.configurationSha256 -cne $root.configurationSha256 -or

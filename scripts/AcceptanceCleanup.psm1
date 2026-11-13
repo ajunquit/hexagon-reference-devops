@@ -8,8 +8,11 @@ function Get-AcceptanceBinding([hashtable] $Inventory) {
         target = $Inventory.target; iac = $Inventory.iac; releaseSha256 = $Inventory.releaseSha256
         descriptorSha256 = $Inventory.descriptorSha256; components = $Inventory.components; dataPolicy = $Inventory.dataPolicy
         roots = @($Inventory.roots | Sort-Object id | ForEach-Object {
-            @{ id = $_.id; adapter = $_.adapter; dependsOn = $_.dependsOn; resourceGroup = $_.resourceGroup
+            $binding = @{ id = $_.id; adapter = $_.adapter; dependsOn = $_.dependsOn
                 stateKey = $_.stateKey; configurationSha256 = $_.configurationSha256; inputsSha256 = $_.inputsSha256 }
+            # AWS roots are scoped by their short prefix (ADR 0025); Azure keeps its resource group.
+            if ($_.ContainsKey('namePrefix')) { $binding.namePrefix = $_.namePrefix } else { $binding.resourceGroup = $_.resourceGroup }
+            $binding
         })
     }
 }
@@ -28,8 +31,10 @@ function New-AcceptanceConsent {
         product = $Inventory.product; environment = $Inventory.environment; instanceId = $Inventory.instance.id
         bindingSha256 = Get-AcceptanceBinding $Inventory; deliverySha256 = $DeliverySha256; deploymentSha256 = $DeploymentSha256
         roots = @($Inventory.roots | Sort-Object id | ForEach-Object {
-            @{ id = $_.id; resourceGroup = $_.resourceGroup; stateLineage = $_.stateLineage; stateSerial = $_.stateSerial
+            $approved = @{ id = $_.id; stateLineage = $_.stateLineage; stateSerial = $_.stateSerial
                 resources = @($_.resources | Where-Object current | Sort-Object id | ForEach-Object { @{ id = $_.id; type = $_.type; address = $_.address } }) }
+            if ($_.ContainsKey('namePrefix')) { $approved.namePrefix = $_.namePrefix } else { $approved.resourceGroup = $_.resourceGroup }
+            $approved
         })
     }
 }
@@ -53,7 +58,8 @@ function Assert-AcceptanceDestroyPlan([hashtable] $Inventory, [hashtable] $Root,
         foreach ($change in $Plan.resource_changes) {
             if ($change.mode -ceq 'data') { continue }
             if (-not $change.change.ContainsKey('before') -or $null -eq $change.change.before -or -not $change.change.before.ContainsKey('id')) { throw 'lifecycle.acceptance.deleteUnapproved' }
-            $id = [string] $change.change.before.id
+            # The inventory records AWS resources as aws:<account>:<region>:<type>:<id> (ADR 0025).
+            $id = ConvertTo-LifecycleResourceId $Inventory $change.type ([string] $change.change.before.id)
             if (@($owned | Where-Object { $_.id -ieq $id -and $_.address -ceq $change.address -and $_.type -ceq $change.type }).Count -ne 1) { throw 'lifecycle.acceptance.deleteUnapproved' }
             $observed += $id.ToLowerInvariant()
         }

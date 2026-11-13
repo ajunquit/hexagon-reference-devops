@@ -7,6 +7,42 @@ $script:ProviderTests = [ordered] @{
     'rabbitmq'          = 'RabbitMqRuntimeTests'
 }
 
+# Paths whose changes can alter the broker or PostgreSQL integration results. A change elsewhere
+# (Terraform, workflows other than CI, acceptance, docs) cannot, so a pull request skips those jobs.
+$script:IntegrationPathPatterns = @(
+    '^operations/'
+    '^local/'
+    '^contracts/'
+    '^examples/'
+    '^products/'
+    '^tests/fixtures/'
+    '^tests/Test-LocalMessagingRuntime\.ps1$'
+    '^scripts/[^/]*(Messaging|ServiceBus|SnsSqs|RabbitMq|CiScope|ApplicationContracts)[^/]*$'
+    '^global\.json$'
+    '^\.github/workflows/ci\.yml$'
+)
+
+function Test-CiIntegrationChange {
+    <#
+    .SYNOPSIS
+        Whether a change needs the broker and PostgreSQL integration jobs.
+
+    .DESCRIPTION
+        Without a known list of changed paths (manual run, first push, rewritten history) every
+        integration runs. Otherwise they run only when a changed path can alter their results.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()] [AllowEmptyCollection()] [string[]] $ChangedPaths)
+
+    if ($null -eq $ChangedPaths) { return $true }
+    foreach ($path in $ChangedPaths) {
+        foreach ($pattern in $script:IntegrationPathPatterns) {
+            if ($path -cmatch $pattern) { return $true }
+        }
+    }
+    return $false
+}
+
 function Get-CiMessagingProviders {
     <#
     .SYNOPSIS
@@ -66,4 +102,4 @@ function ConvertTo-CiMessagingMatrix {
     return ConvertTo-Json -InputObject $include -Compress -Depth 3
 }
 
-Export-ModuleMember -Function Get-CiMessagingProviders, ConvertTo-CiMessagingMatrix
+Export-ModuleMember -Function Get-CiMessagingProviders, ConvertTo-CiMessagingMatrix, Test-CiIntegrationChange

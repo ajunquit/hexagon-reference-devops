@@ -1,7 +1,9 @@
 name: DevOps CI
 on:
+  # A pull request that only changes documentation runs nothing; main always builds its candidate.
   pull_request:
     branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
   push:
     branches: [main]
   workflow_dispatch:
@@ -14,27 +16,33 @@ concurrency:
 
 jobs:
   # The template tests every messaging provider; a product only the one its backend declares.
+  # The broker and PostgreSQL integrations run only when the change can alter them, and always on a
+  # manual run: the actions minutes are limited.
   scope:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       messaging-matrix: ${{ steps.scope.outputs.messaging-matrix }}
       messaging-enabled: ${{ steps.scope.outputs.messaging-enabled }}
+      integrations: ${{ steps.scope.outputs.integrations }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Select the messaging providers of this repository
+          fetch-depth: 0
+      - name: Select the messaging providers and integrations of this change
         id: scope
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.HEXAGON_APPLICATIONS_READ_TOKEN || github.token }}
-        run: ./scripts/Get-CiScope.ps1 -GitHubOutput
+          BASE_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || '' }}
+        run: ./scripts/Get-CiScope.ps1 -GitHubOutput -BaseCommit $env:BASE_COMMIT
 
   validate-build:
     needs: [scope, messaging-integration, database-integration]
-    # An API-only product skips the broker tests; any failure or cancellation still stops the build.
-    if: ${{ !cancelled() && needs.scope.result == 'success' && needs.database-integration.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.messaging-integration.result) }}
+    # An API-only product or a change outside the integrations skips them; any failure or
+    # cancellation still stops the build.
+    if: ${{ !cancelled() && needs.scope.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.database-integration.result) && contains(fromJSON('["success", "skipped"]'), needs.messaging-integration.result) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -92,11 +100,11 @@ jobs:
             artifacts/operations/build.json
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 2
 
   messaging-integration:
     needs: scope
-    if: needs.scope.outputs.messaging-enabled == 'true'
+    if: needs.scope.outputs.messaging-enabled == 'true' && needs.scope.outputs.integrations == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
@@ -130,9 +138,11 @@ jobs:
           name: messaging-tests-${{ matrix.provider }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/integration/*.trx
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 2
 
   database-integration:
+    needs: scope
+    if: needs.scope.outputs.integrations == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

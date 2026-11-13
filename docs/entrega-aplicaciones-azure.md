@@ -35,7 +35,8 @@ no acredita por sí mismo aceptación cloud de mx.
    Los bindings de hosting y referencias Key Vault proceden del snapshot revisado. No se aceptan
    nombres de recursos ni comandos libres como parámetros de entrega.
 4. Tres candidatos de CI satisfactorios de main: backend, web y operaciones DevOps. Deben seguir
-   disponibles dentro de su retención de 30 días. Los candidatos de PR no son desplegables.
+   disponibles dentro de su retención (2 días en las plantillas); si caducaron, se relanza la CI de
+   main del componente con `workflow_dispatch`. Los candidatos de PR no son desplegables.
 5. Secreto **`HEXAGON_ARTIFACTS_READ_TOKEN`** del Environment, con acceso de lectura `Actions: read`
    a los repositorios privados de backend y frontend. El candidato del propio repositorio DevOps
    usa `github.token` con `actions: read`. El permiso `Contents: read` por sí solo no descarga

@@ -128,17 +128,27 @@ run "the_initial_state_creates_private_data_and_no_workloads" {
 run "maintenance_tasks_precede_the_rollout" {
   variables { maintenance_jobs_enabled = true }
   assert {
-    condition     = toset(keys(aws_ecs_task_definition.maintenance)) == toset(["migrations", "database-access"]) && length(aws_ecs_service.workload) == 0
-    error_message = "Database access and migrations must exist before any workload."
+    condition     = toset(keys(aws_ecs_task_definition.maintenance)) == toset(["database-credentials", "migrations", "database-access"]) && length(aws_ecs_service.workload) == 0
+    error_message = "Database credentials, migrations and database access must exist before any workload."
+  }
+  assert {
+    condition = (jsondecode(aws_ecs_task_definition.maintenance["database-credentials"].container_definitions)[0].command == ["--prepare-credentials"] &&
+      jsondecode(aws_ecs_task_definition.maintenance["database-access"].container_definitions)[0].command == [] &&
+    jsondecode(aws_ecs_task_definition.maintenance["database-access"].container_definitions)[0].secrets == [{ name = "HEXAGON_DATABASE_MAINTENANCE", valueFrom = aws_secretsmanager_secret.maintenance_connection.arn }])
+    error_message = "Only database-credentials uses the master user; the runtime grants run with the maintenance login."
+  }
+  assert {
+    condition     = contains(jsondecode(aws_iam_role_policy.maintenance_writes_connections.policy).Statement[0].Action, "secretsmanager:GetSecretValue")
+    error_message = "The maintenance tasks read their secrets to keep existing credentials."
   }
   assert {
     condition     = jsondecode(aws_ecs_task_definition.maintenance["migrations"].container_definitions)[0].secrets[0].valueFrom == aws_secretsmanager_secret.maintenance_connection.arn
     error_message = "Migrations connect with the maintenance connection secret."
   }
   assert {
-    condition = (jsondecode(aws_ecs_task_definition.maintenance["database-access"].container_definitions)[0].secrets[1].valueFrom ==
+    condition = (jsondecode(aws_ecs_task_definition.maintenance["database-credentials"].container_definitions)[0].secrets[1].valueFrom ==
       "arn:aws:secretsmanager:us-east-1:123456789012:secret:rds!db-0001-AbCdEf:password::" &&
-    jsondecode(jsondecode(aws_ecs_task_definition.maintenance["database-access"].container_definitions)[0].environment[0].value).provider == "aws")
+    jsondecode(jsondecode(aws_ecs_task_definition.maintenance["database-credentials"].container_definitions)[0].environment[0].value).provider == "aws")
     error_message = "Database access reads the administrator from the RDS-managed secret, never from Terraform."
   }
   assert {
@@ -175,5 +185,29 @@ run "the_rollout_serves_the_api_behind_cloudfront" {
   assert {
     condition     = output.api_url == "https://d111111abcdef8.cloudfront.net/api/v1"
     error_message = "The API is published under the CloudFront origin."
+  }
+}
+
+run "every_role_carries_the_workload_boundary_inside_a_reservation" {
+  variables {
+    workload_boundary_arn    = "arn:aws:iam::123456789012:policy/hexagon-workload-boundary"
+    maintenance_jobs_enabled = true
+  }
+  assert {
+    condition = alltrue(concat(
+      [for role in values(aws_iam_role.workload) : role.permissions_boundary == "arn:aws:iam::123456789012:policy/hexagon-workload-boundary"],
+      [for role in values(aws_iam_role.execution) : role.permissions_boundary == "arn:aws:iam::123456789012:policy/hexagon-workload-boundary"],
+      [aws_iam_role.maintenance.permissions_boundary == "arn:aws:iam::123456789012:policy/hexagon-workload-boundary"]
+    ))
+    error_message = "A reservation only lets the deployment create roles bounded by aws-access (ADR 0025)."
+  }
+}
+
+run "every_response_carries_the_security_headers" {
+  assert {
+    condition = (aws_cloudfront_response_headers_policy.security.security_headers_config[0].content_type_options[0].override &&
+      aws_cloudfront_response_headers_policy.security.security_headers_config[0].referrer_policy[0].referrer_policy == "no-referrer" &&
+    one(aws_cloudfront_distribution.web.default_cache_behavior).response_headers_policy_id == aws_cloudfront_response_headers_policy.security.id)
+    error_message = "The SPA and the API must answer with nosniff and no-referrer."
   }
 }

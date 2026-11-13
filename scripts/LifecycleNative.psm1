@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
 function Invoke-LifecycleCommand {
-    param([ValidateSet('git', 'terraform', 'az', 'pwsh', 'static-web-client', 'acceptance-browser')][string] $Tool, [string[]] $Arguments,
+    param([ValidateSet('git', 'terraform', 'az', 'aws', 'pwsh', 'static-web-client', 'acceptance-browser')][string] $Tool, [string[]] $Arguments,
         [string] $Directory, [hashtable] $Environment = @{}, [int] $TimeoutSeconds = 1200, [scriptblock] $Heartbeat)
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
@@ -56,7 +56,8 @@ function Invoke-LifecycleCommand {
         }
         $null = $outTask.GetAwaiter().GetResult(); $null = $errTask.GetAwaiter().GetResult()
         if ($stdout.Length -gt 33554432 -or $stderr.Length -gt 33554432) { throw 'lifecycle.nativeOutputTooLarge' }
-        return @{ exitCode = $process.ExitCode; bytes = $stdout.ToArray(); text = [Text.Encoding]::UTF8.GetString($stdout.ToArray()) }
+        # errorText lets callers classify a failure (for example a failed S3 precondition); it is never logged.
+        return @{ exitCode = $process.ExitCode; bytes = $stdout.ToArray(); text = [Text.Encoding]::UTF8.GetString($stdout.ToArray()); errorText = [Text.Encoding]::UTF8.GetString($stderr.ToArray()) }
     }
     catch {
         if ($_.Exception.Message -cmatch '^lifecycle[.][A-Za-z0-9.]+$') { throw }
@@ -70,7 +71,7 @@ function Invoke-LifecycleCommand {
 
 function Assert-LifecycleCliEnvironment {
     if (@(Get-ChildItem Env: | Where-Object { $_.Name -like 'TF_CLI_ARGS*' -or $_.Name -in @('TF_DATA_DIR', 'TF_CLI_CONFIG_FILE') -or
-        ($_.Name -like 'ARM_*' -and $_.Name -notin @('ARM_SUBSCRIPTION_ID', 'ARM_TENANT_ID')) -or
+        ($_.Name -like 'ARM_*' -and $_.Name -notin @('ARM_SUBSCRIPTION_ID', 'ARM_TENANT_ID')) -or $_.Name -like 'AWS_ENDPOINT_URL*' -or
         ($_.Name -eq 'TF_WORKSPACE' -and $_.Value -cne 'default') }).Count -gt 0) { throw 'lifecycle.ambientConfiguration' }
 }
 
