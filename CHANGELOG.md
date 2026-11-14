@@ -2,6 +2,8 @@
 
 ## Sin publicar
 
+- Se retira `docs/continuidad/`: es documentación interna de la plataforma y no corresponde a un
+  repositorio público. Las sincronizaciones desde la plantilla no la vuelven a traer.
 - Instancia pública de DevOps para Reference; frontend, backend y core privados.
 - Bootstrap Azure con destino autorizado, estado privado y una sola identidad de despliegue para `dev`.
 - Se retiraron los grupos, identidades, permisos, contenedores y Environments de `staging` y `prod`
