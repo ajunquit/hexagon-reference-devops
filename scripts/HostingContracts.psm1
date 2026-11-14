@@ -37,6 +37,20 @@ function Assert-ReleaseSources {
 
 function ConvertTo-AzureHostingInput {
     param($Descriptor, $Release, $Policy, $Backend, $Frontend)
+    $registry = $Policy.infrastructure.registry_name
+    return ConvertTo-HostingInput $Descriptor $Release $Policy $Backend $Frontend { param($image) ConvertTo-EnvironmentImageReference $image $registry }
+}
+
+function ConvertTo-AwsHostingInput {
+    param($Descriptor, $Release, $Policy, $Backend, $Frontend)
+    $infra = $Policy.infrastructure
+    $repository = "$($infra.account_id).dkr.ecr.$($infra.region).amazonaws.com/$($infra.name_prefix)"
+    return ConvertTo-HostingInput $Descriptor $Release $Policy $Backend $Frontend { param($image) ConvertTo-AwsImageReference $image $repository }
+}
+
+function ConvertTo-HostingInput {
+    # Validates the composition shared by every cloud; $ImageReference maps a release image to the environment registry.
+    param($Descriptor, $Release, $Policy, $Backend, $Frontend, [scriptblock] $ImageReference)
     Assert-ReleaseSources -Descriptor $Descriptor -Release $Release
     if ($Policy.product -cne $Descriptor.product -or $Policy.environment -cne $Descriptor.environment) { throw 'Hosting policy product or environment mismatch.' }
     if ($Backend.apiVersion -cne 'hexagon.ec/backend-hosting-requirements/v1' -or $Frontend.apiVersion -cne 'hexagon.ec/frontend-hosting-requirements/v2') { throw 'Unsupported hosting contract version.' }
@@ -54,7 +68,7 @@ function ConvertTo-AzureHostingInput {
     foreach ($key in $infra.Keys) { $result[$key] = $infra[$key] }
     $result.auth = @{ authority = $infra.auth.authority; client_id = $infra.auth.client_id; audience = $Backend.identity.audience; api_scope = $Backend.identity.apiScope }
     $result.database_connection_name = $Backend.database.connectionName
-    $result.bootstrap_image = ConvertTo-EnvironmentImageReference $Release.artifacts.databaseBootstrap.image $infra.registry_name
+    $result.bootstrap_image = & $ImageReference $Release.artifacts.databaseBootstrap.image
     $result.migration_workload = $Backend.migrations.workload
     $result.maintenance_jobs_enabled = $false
     $result.application_rollout_enabled = $false
@@ -72,7 +86,7 @@ function ConvertTo-AzureHostingInput {
         if ($workload.healthPort -ne 8081 -or ($workload.httpPorts -join ',') -cne $(if ($workload.kind -ceq 'api') { '8080,8081' } else { '8081' })) { throw 'Unsupported workload ports.' }
         $physical = @{} + $Policy.workloads[$workload.id]
         $physical.kind = $workload.kind
-        $physical.image = ConvertTo-EnvironmentImageReference $Release.artifacts.backend[$workload.id] $infra.registry_name
+        $physical.image = & $ImageReference $Release.artifacts.backend[$workload.id]
         $physical.http_ports = $workload.httpPorts
         $physical.health_port = $workload.healthPort
         $result.workloads[$workload.id] = $physical
@@ -85,4 +99,14 @@ function ConvertTo-EnvironmentImageReference([string] $Image, [string] $Registry
     return "$Registry.azurecr.io/" + $Image.Substring($Image.IndexOf('/') + 1)
 }
 
-Export-ModuleMember -Function Read-HostingContract, Assert-ReleaseSources, ConvertTo-AzureHostingInput
+function ConvertTo-AwsImageReference([string] $Image, [string] $Repository) {
+    # Delivery copies the same manifest into <account>.dkr.ecr.<region>.amazonaws.com/<name_prefix>/<artifact>,
+    # keeping the digest; the artifact is the last path segment of the release image.
+    $parts = $Image.Split('@')
+    if ($parts.Count -ne 2 -or $parts[1] -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Release images must be pinned by digest.' }
+    $artifact = $parts[0].Substring($parts[0].LastIndexOf('/') + 1)
+    if ($artifact -cnotmatch '^[a-z0-9][a-z0-9._-]*$') { throw "Invalid artifact name '$artifact'." }
+    return "$Repository/$artifact@$($parts[1])"
+}
+
+Export-ModuleMember -Function Read-HostingContract, Assert-ReleaseSources, ConvertTo-AzureHostingInput, ConvertTo-AwsHostingInput

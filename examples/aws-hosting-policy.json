@@ -1,0 +1,60 @@
+{
+  "$schema": "../contracts/schemas/aws-hosting-policy-v1.schema.json",
+  "apiVersion": "hexagon.ec/aws-hosting-policy/v1",
+  "kind": "AwsHostingPolicy",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "infrastructure": {
+    "account_id": "123456789012",
+    "region": "us-east-1",
+    "name_prefix": "example-dev-0001",
+    "availability_zones": [
+      "us-east-1a",
+      "us-east-1b"
+    ],
+    "vpc_cidr": "10.42.0.0/16",
+    "public_subnet_cidrs": [
+      "10.42.0.0/24",
+      "10.42.1.0/24"
+    ],
+    "database_subnet_cidrs": [
+      "10.42.10.0/24",
+      "10.42.11.0/24"
+    ],
+    "database_name": "hexagon_example",
+    "auth": {
+      "authority": "https://auth.example.test/realms/hexagon",
+      "client_id": "example-web"
+    },
+    "tags": {}
+  },
+  "workloads": {
+    "hexagon-example-api": {
+      "name": "example-dev-0",
+      "cpu": 256,
+      "memory": 512,
+      "min_replicas": 1,
+      "max_replicas": 1,
+      "environment": {},
+      "secret_references": {}
+    },
+    "hexagon-example-worker": {
+      "name": "example-dev-1",
+      "cpu": 256,
+      "memory": 512,
+      "min_replicas": 1,
+      "max_replicas": 1,
+      "environment": {},
+      "secret_references": {}
+    },
+    "hexagon-example-sales-worker": {
+      "name": "example-dev-2",
+      "cpu": 256,
+      "memory": 512,
+      "min_replicas": 1,
+      "max_replicas": 1,
+      "environment": {},
+      "secret_references": {}
+    }
+  }
+}

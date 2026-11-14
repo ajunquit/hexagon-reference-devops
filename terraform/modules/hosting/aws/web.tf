@@ -113,6 +113,25 @@ resource "aws_cloudfront_vpc_origin" "applications" {
   }
   tags = local.tags
 }
+# Security headers on every response, as the delivery verification requires (nosniff, no-referrer).
+resource "aws_cloudfront_response_headers_policy" "security" {
+  name    = "${var.name_prefix}-security"
+  comment = "Security headers of ${var.product} ${var.environment}"
+  security_headers_config {
+    content_type_options {
+      override = true
+    }
+    referrer_policy {
+      referrer_policy = "no-referrer"
+      override        = true
+    }
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      override                   = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "web" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -133,12 +152,13 @@ resource "aws_cloudfront_distribution" "web" {
     }
   }
   default_cache_behavior {
-    target_origin_id       = "web"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = local.cache_optimized
-    compress               = true
+    target_origin_id           = "web"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = local.cache_optimized
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+    compress                   = true
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.spa.arn
@@ -147,14 +167,15 @@ resource "aws_cloudfront_distribution" "web" {
   dynamic "ordered_cache_behavior" {
     for_each = local.application_path_patterns
     content {
-      path_pattern             = ordered_cache_behavior.value
-      target_origin_id         = "applications"
-      viewer_protocol_policy   = "https-only"
-      allowed_methods          = local.application_allowed_methods
-      cached_methods           = ["GET", "HEAD"]
-      cache_policy_id          = local.cache_disabled
-      origin_request_policy_id = local.all_viewer_except_host
-      compress                 = true
+      path_pattern               = ordered_cache_behavior.value
+      target_origin_id           = "applications"
+      viewer_protocol_policy     = "https-only"
+      allowed_methods            = local.application_allowed_methods
+      cached_methods             = ["GET", "HEAD"]
+      cache_policy_id            = local.cache_disabled
+      origin_request_policy_id   = local.all_viewer_except_host
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+      compress                   = true
     }
   }
   restrictions {

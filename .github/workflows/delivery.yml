@@ -16,7 +16,7 @@ on:
         description: Deliver applications or review and run acceptance with ephemeral cleanup
         required: true
         type: choice
-        options: [Artifacts, PrepareMaintenance, ApplyMaintenance, KeycloakDatabase, PrepareIdentity, ApplyIdentity, Migrations, DatabaseAccess, PrepareActivation, ApplyActivation, PublishWeb, VerifyServing, PrepareAcceptance, Acceptance]
+        options: [Artifacts, PrepareMaintenance, ApplyMaintenance, DatabaseCredentials, KeycloakDatabase, PrepareIdentity, ApplyIdentity, Migrations, DatabaseAccess, PrepareActivation, ApplyActivation, PublishWeb, VerifyServing, PrepareAcceptance, Acceptance]
       delivery_sha256:
         description: SHA-256 of the tracked delivery.json on main
         required: true
@@ -50,6 +50,10 @@ jobs:
       actions: read
       deployments: read
     outputs:
+      provider: ${{ steps.definition.outputs.provider }}
+      role_arn: ${{ steps.definition.outputs.role_arn }}
+      aws_region: ${{ steps.definition.outputs.aws_region }}
+      account_id: ${{ steps.definition.outputs.account_id }}
       client_id: ${{ steps.definition.outputs.client_id }}
       tenant_id: ${{ steps.definition.outputs.tenant_id }}
       subscription_id: ${{ steps.definition.outputs.subscription_id }}
@@ -73,9 +77,17 @@ jobs:
           $result = ./scripts/Invoke-ApplicationDelivery.ps1 -Stage Validate -DeliverySha256 $env:DELIVERY_SHA256 -Environment $env:TARGET_ENVIRONMENT -InstanceId $env:INSTANCE_ID -DefinitionSha256 $env:DEFINITION_SHA256
           if ($LASTEXITCODE -ne 0) { throw 'Instance definition or GitHub protections are invalid.' }
           $value = $result -join "`n" | ConvertFrom-Json
-          "client_id=$($value.details.clientId)" >> $env:GITHUB_OUTPUT
-          "tenant_id=$($value.details.tenantId)" >> $env:GITHUB_OUTPUT
-          "subscription_id=$($value.details.subscriptionId)" >> $env:GITHUB_OUTPUT
+          "provider=$($value.details.provider)" >> $env:GITHUB_OUTPUT
+          if ($value.details.provider -ceq 'aws') {
+            "role_arn=$($value.details.roleArn)" >> $env:GITHUB_OUTPUT
+            "aws_region=$($value.details.region)" >> $env:GITHUB_OUTPUT
+            "account_id=$($value.details.accountId)" >> $env:GITHUB_OUTPUT
+          }
+          else {
+            "client_id=$($value.details.clientId)" >> $env:GITHUB_OUTPUT
+            "tenant_id=$($value.details.tenantId)" >> $env:GITHUB_OUTPUT
+            "subscription_id=$($value.details.subscriptionId)" >> $env:GITHUB_OUTPUT
+          }
           "environment_name=$($value.details.githubEnvironment)" >> $env:GITHUB_OUTPUT
 
   execute:
@@ -102,16 +114,26 @@ jobs:
       - name: Check exact environment bindings before authentication
         shell: pwsh
         env:
+          PROVIDER: ${{ needs.validate.outputs.provider }}
           EXPECTED_CLIENT: ${{ needs.validate.outputs.client_id }}
           EXPECTED_TENANT: ${{ needs.validate.outputs.tenant_id }}
           EXPECTED_SUBSCRIPTION: ${{ needs.validate.outputs.subscription_id }}
+          EXPECTED_ROLE: ${{ needs.validate.outputs.role_arn }}
+          EXPECTED_REGION: ${{ needs.validate.outputs.aws_region }}
+          EXPECTED_ACCOUNT: ${{ needs.validate.outputs.account_id }}
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          BOUND_ROLE: ${{ vars.AWS_ROLE_ARN }}
+          BOUND_REGION: ${{ vars.AWS_REGION }}
+          BOUND_ACCOUNT: ${{ vars.AWS_ACCOUNT_ID }}
         run: |
-          if ($env:AZURE_CLIENT_ID -cne $env:EXPECTED_CLIENT -or $env:AZURE_TENANT_ID -cne $env:EXPECTED_TENANT -or $env:AZURE_SUBSCRIPTION_ID -cne $env:EXPECTED_SUBSCRIPTION) { throw 'Environment binding drift.' }
+          if ($env:PROVIDER -ceq 'aws') {
+            if ($env:BOUND_ROLE -cne $env:EXPECTED_ROLE -or $env:BOUND_REGION -cne $env:EXPECTED_REGION -or $env:BOUND_ACCOUNT -cne $env:EXPECTED_ACCOUNT) { throw 'Environment binding drift.' }
+          }
+          elseif ($env:PROVIDER -cne 'azure' -or $env:AZURE_CLIENT_ID -cne $env:EXPECTED_CLIENT -or $env:AZURE_TENANT_ID -cne $env:EXPECTED_TENANT -or $env:AZURE_SUBSCRIPTION_ID -cne $env:EXPECTED_SUBSCRIPTION) { throw 'Environment binding drift.' }
       - name: Install the checksum-pinned static content client
-        if: inputs.stage == 'PublishWeb'
+        if: inputs.stage == 'PublishWeb' && needs.validate.outputs.provider == 'azure'
         shell: pwsh
         run: ./scripts/Install-StaticWebClient.ps1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -126,7 +148,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Browser dependency installation failed.' }
           node acceptance/node_modules/playwright/cli.js install --with-deps chromium
           if ($LASTEXITCODE -ne 0) { throw 'Browser installation failed.' }
+      - name: Authenticate with the isolated AWS reservation role
+        if: needs.validate.outputs.provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ needs.validate.outputs.role_arn }}
+          aws-region: ${{ needs.validate.outputs.aws_region }}
+          role-session-name: hexagon-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Authenticate with the isolated instance identity
+        if: needs.validate.outputs.provider == 'azure'
         uses: Azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
         with:
           client-id: ${{ needs.validate.outputs.client_id }}
@@ -159,6 +189,8 @@ jobs:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
         run: ./scripts/Invoke-ApplicationDelivery.ps1 -Stage $env:DELIVERY_STAGE -DeliverySha256 $env:DELIVERY_SHA256 -Environment $env:TARGET_ENVIRONMENT -InstanceId $env:INSTANCE_ID -DefinitionSha256 $env:DEFINITION_SHA256 -ReviewSha256 $env:REVIEW_SHA256 -Confirmation $env:CONFIRMATION
       - name: Report recovery location
         if: always()
@@ -167,4 +199,4 @@ jobs:
           TARGET_ENVIRONMENT: ${{ inputs.environment }}
           INSTANCE_ID: ${{ inputs.instance_id }}
         run: |
-          "Inventory, delivery checkpoints and plans are retained in the reserved instance container. Reconcile interrupted Terraform operations with Genesis Sync; redispatch the same job stage to reconcile its recorded execution. SPA publication and application verification remain pending." >> $env:GITHUB_STEP_SUMMARY
+          "Inventory, delivery checkpoints and plans are retained in the reserved instance store (Blob container on Azure, S3 prefix on AWS). Reconcile interrupted Terraform operations with Genesis Sync; redispatch the same job stage to reconcile its recorded execution. SPA publication and application verification remain pending." >> $env:GITHUB_STEP_SUMMARY

@@ -60,10 +60,11 @@ function New-PublicWebHttpClient {
     return $client
 }
 
+# Only the default host of the provider's site: Azure Static Web Apps or CloudFront (ADR 0025).
 function Get-PublicWebFile([string] $Origin, [string] $Path, [long] $MaximumBytes) {
     $address = [uri] $Origin
     if ($address.Scheme -cne 'https' -or $address.Port -ne 443 -or $address.UserInfo -or $address.Query -or $address.Fragment -or $address.AbsolutePath -cne '/' -or
-        $address.Host -cnotmatch '^[a-z0-9-]+[.](?:[a-z0-9-]+[.])?azurestaticapps[.]net$' -or $Path.StartsWith('/') -or $Path.Contains('\') -or $Path -match '(^|/)[.][.]?(/|$)|[?#]') { throw 'lifecycle.web.publicEndpointInvalid' }
+        $address.Host -cnotmatch '^(?:[a-z0-9-]+[.](?:[a-z0-9-]+[.])?azurestaticapps[.]net|[a-z0-9]+[.]cloudfront[.]net)$' -or $Path.StartsWith('/') -or $Path.Contains('\') -or $Path -match '(^|/)[.][.]?(/|$)|[?#]') { throw 'lifecycle.web.publicEndpointInvalid' }
     $escaped = (($Path -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
     $client = New-PublicWebHttpClient; $response = $null; $stream = $null
     $cancel = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(30))

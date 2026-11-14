@@ -18,16 +18,25 @@ Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
 $status = 'Blocked'; $code = $null; $details = @{}
 
 function Invoke-ReservationTerraform([string[]] $Arguments) {
-    $result = Invoke-LifecycleCommand terraform (@("-chdir=$workspacePath") + $Arguments) -Environment @{ ARM_USE_CLI = 'true'; ARM_USE_MSI = 'false'; ARM_USE_OIDC = 'false'; ARM_TENANT_ID = $model.inventory.target.tenantId; ARM_SUBSCRIPTION_ID = $model.inventory.target.subscriptionId; TF_CLI_CONFIG_FILE = (Join-Path $workspacePath 'terraform.rc'); TF_IN_AUTOMATION = 'true' }
+    $environment = $(if ($aws) { @{ AWS_REGION = $model.inventory.target.region } }
+        else { @{ ARM_USE_CLI = 'true'; ARM_USE_MSI = 'false'; ARM_USE_OIDC = 'false'; ARM_TENANT_ID = $model.inventory.target.tenantId; ARM_SUBSCRIPTION_ID = $model.inventory.target.subscriptionId } })
+    $environment.TF_CLI_CONFIG_FILE = Join-Path $workspacePath 'terraform.rc'; $environment.TF_IN_AUTOMATION = 'true'
+    $result = Invoke-LifecycleCommand terraform (@("-chdir=$workspacePath") + $Arguments) -Environment $environment
     if ($result.exitCode -ne 0) { throw 'lifecycle.ephemeral.terraformFailed' }
     return $result
 }
 function Write-ReservationJson([string] $Name, [object] $Value) { [IO.File]::WriteAllText((Join-Path $workspacePath $Name), (ConvertTo-PlatformBootstrapJson $Value) + "`n") }
+function Invoke-ReservationAws([string[]] $Arguments) {
+    $result = Invoke-LifecycleCommand aws ($Arguments + @('--region', $model.inventory.target.region, '--output', 'json')) -TimeoutSeconds 45
+    if ($result.exitCode -ne 0) { throw 'lifecycle.ephemeral.awsUnavailable' }
+    return $result.text | ConvertFrom-Json -AsHashtable -Depth 32
+}
 
 try {
     $repository = Split-Path -Parent $PSScriptRoot
     $model = Read-EphemeralEnvironment $Definition
     $inventory = $model.inventory
+    $aws = $inventory.target.ContainsKey('accountId')
     $workspacePath = [IO.Path]::GetFullPath($Workspace, (Get-Location).ProviderPath)
     if ($WhatIfPreference) { $status = 'Unverified' }
     elseif ($PSCmdlet.ShouldProcess("$($inventory.product)/$($inventory.environment)/$($inventory.instance.id)", "$Mode isolated bootstrap reservation")) {
@@ -39,6 +48,15 @@ try {
         $name = $origin.text.Trim() -replace '^https://github[.]com/', '' -replace '^git@github[.]com:', '' -replace '[.]git$', ''
         $product = (Get-Content -Raw -LiteralPath (Join-Path $repository '.config/product.json') | ConvertFrom-Json).product
         if ($origin.exitCode -ne 0 -or $name -ine $inventory.iac.repository -or $product -cne $inventory.product) { throw 'lifecycle.selectionMismatch' }
+        if ($aws) {
+            # The operator of the account bootstrap, never the federated identity of the instance.
+            $caller = Invoke-ReservationAws @('sts', 'get-caller-identity')
+            if ($caller.Account -cne $inventory.target.accountId -or $caller.Arn -ceq $inventory.target.roleArn) { throw 'lifecycle.ephemeral.accountMismatch' }
+            Assert-EphemeralRepository $model
+            $bucket = $inventory.target.stateBucket
+            Assert-AwsEphemeralStateBucket $model (Invoke-ReservationAws @('s3api', 'get-bucket-encryption', '--bucket', $bucket)) (Invoke-ReservationAws @('s3api', 'get-bucket-versioning', '--bucket', $bucket)) (Invoke-ReservationAws @('s3api', 'get-public-access-block', '--bucket', $bucket))
+        }
+        else {
         $account = Invoke-LifecycleCommand az @('account', 'show', '--output', 'json', '--only-show-errors') -TimeoutSeconds 45
         if ($account.exitCode -ne 0) { throw 'lifecycle.ephemeral.accountUnavailable' }
         $account = $account.text | ConvertFrom-Json -AsHashtable
@@ -54,10 +72,13 @@ try {
         $properties = Invoke-LifecycleCommand az @('storage', 'account', 'blob-service-properties', 'show', '--account-name', $inventory.target.storageAccount, '--resource-group', $inventory.target.stateResourceGroup, '--subscription', $inventory.target.subscriptionId, '--output', 'json', '--only-show-errors') -TimeoutSeconds 45
         if ($storage.exitCode -ne 0 -or $properties.exitCode -ne 0) { throw 'lifecycle.ephemeral.storageUnavailable' }
         Assert-EphemeralBootstrapStorage $model ($storage.text | ConvertFrom-Json -AsHashtable) ($properties.text | ConvertFrom-Json -AsHashtable)
-        $root = Join-Path $repository 'terraform/bootstrap/azure-ephemeral'
+        }
+        $rootName = $(if ($aws) { 'aws-ephemeral' } else { 'azure-ephemeral' })
+        $providerName = $(if ($aws) { 'aws' } else { 'azurerm' })
+        $root = Join-Path $repository "terraform/bootstrap/$rootName"
         $files = @('main.tf', 'providers.tf', 'variables.tf', 'outputs.tf', 'versions.tf', '.terraform.lock.hcl')
         $sourceHashes = @{}
-        foreach ($relative in @($files | ForEach-Object { "terraform/bootstrap/azure-ephemeral/$_" }) + @('scripts/Invoke-EphemeralBootstrap.ps1', 'scripts/EphemeralEnvironment.psm1', 'scripts/LifecycleNative.psm1', 'scripts/EnvironmentLifecycle.psm1', 'scripts/EnvironmentSnapshot.psm1', 'scripts/PlatformBootstrap.Execution.psm1', 'scripts/PlatformBootstrap.psm1')) {
+        foreach ($relative in @($files | ForEach-Object { "terraform/bootstrap/$rootName/$_" }) + @('scripts/Invoke-EphemeralBootstrap.ps1', 'scripts/EphemeralEnvironment.psm1', 'scripts/AwsEphemeralEnvironment.psm1', 'scripts/LifecycleNative.psm1', 'scripts/EnvironmentLifecycle.psm1', 'scripts/EnvironmentSnapshot.psm1', 'scripts/PlatformBootstrap.Execution.psm1', 'scripts/PlatformBootstrap.psm1')) {
             $sourceFile = Invoke-LifecycleCommand git @('show', "HEAD:$relative") $repository -TimeoutSeconds 30
             $hash = Get-LifecycleFileHash (Join-Path $repository $relative)
             if ($sourceFile.exitCode -ne 0 -or [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($sourceFile.bytes)).ToLowerInvariant() -cne $hash) { throw 'lifecycle.ephemeral.sourceUntrusted' }
@@ -68,14 +89,23 @@ try {
             $workspacePath = New-EphemeralWorkspace $workspacePath -Confirm:$false
             foreach ($name in $files) { Copy-Item -LiteralPath (Join-Path $root $name) -Destination $workspacePath }
             [IO.File]::WriteAllText((Join-Path $workspacePath 'terraform.rc'), "disable_checkpoint = true`nprovider_installation {`n  direct {}`n}`n")
+            if ($aws) {
+                $reservationKey = "bootstrap/ephemeral/$($inventory.product)/$($inventory.environment)/$($inventory.instance.id).tfstate"
+                Write-ReservationJson 'backend.json' @{ bucket = $inventory.target.stateBucket; key = $reservationKey; region = $inventory.target.region; encrypt = $true; kms_key_id = $model.stateKmsKeyArn; use_lockfile = $true }
+                Write-ReservationJson 'inputs.tfvars.json' @{ region = $inventory.target.region; product = $inventory.product; environment = $inventory.environment; instance_id = $inventory.instance.id
+                    name_prefix_base = $model.namePrefixBase; oidc_prefix = $model.oidcPrefix; github_oidc_provider_arn = $model.githubOidcProviderArn; workload_boundary_arn = $model.workloadBoundaryArn
+                    state_bucket = $inventory.target.stateBucket; state_kms_key_arn = $model.stateKmsKeyArn; expires_at = $model.expiresAt }
+            }
+            else {
             Write-ReservationJson 'backend.json' @{ resource_group_name = $inventory.target.stateResourceGroup; storage_account_name = $inventory.target.storageAccount; container_name = $model.bootstrapContainer; key = "bootstrap/ephemeral/$($inventory.product)/$($inventory.environment)/$($inventory.instance.id).tfstate"; subscription_id = $inventory.target.subscriptionId; tenant_id = $inventory.target.tenantId; use_azuread_auth = $true; use_cli = $true; use_oidc = $false }
             Write-ReservationJson 'inputs.tfvars.json' @{ subscription_id = $inventory.target.subscriptionId; tenant_id = $inventory.target.tenantId; product = $inventory.product; environment = $inventory.environment; instance_id = $inventory.instance.id; location = $model.location; state_resource_group = $inventory.target.stateResourceGroup; storage_account_name = $inventory.target.storageAccount; oidc_prefix = $model.oidcPrefix; expires_at = $model.expiresAt; roots = @($inventory.roots.id) }
+            }
         }
         else {
             $workspacePath = Resolve-EphemeralWorkspacePath $workspacePath
             foreach ($item in Get-ChildItem -LiteralPath $workspacePath -Recurse -Force) {
                 $relative = [IO.Path]::GetRelativePath($workspacePath, $item.FullName).Replace('\', '/')
-                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint -and $relative -cnotmatch '^[.]terraform/providers/registry[.]terraform[.]io/hashicorp/azurerm/[0-9.]+/(linux|windows|darwin)_(amd64|arm64)$') { throw 'lifecycle.ephemeral.workspaceLink' }
+                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint -and $relative -cnotmatch "^[.]terraform/providers/registry[.]terraform[.]io/hashicorp/$providerName/[0-9.]+/(linux|windows|darwin)_(amd64|arm64)$") { throw 'lifecycle.ephemeral.workspaceLink' }
             }
             foreach ($name in $files) { if ((Get-LifecycleFileHash (Join-Path $root $name)) -cne (Get-LifecycleFileHash (Join-Path $workspacePath $name))) { throw 'lifecycle.ephemeral.sourceChanged' } }
             foreach ($item in Get-ChildItem -LiteralPath $workspacePath -File -Force) {
@@ -92,7 +122,7 @@ try {
             Invoke-ReservationTerraform @('plan', '-input=false', '-lock-timeout=60s', '-no-color', '-var-file=inputs.tfvars.json', '-out=reservation.tfplan') | Out-Null
             $show = Invoke-ReservationTerraform @('show', '-json', 'reservation.tfplan')
             $plan = $show.text | ConvertFrom-Json -AsHashtable -Depth 64
-            Assert-EphemeralReservationPlan $plan
+            if ($aws) { Assert-AwsEphemeralReservationPlan $plan } else { Assert-EphemeralReservationPlan $plan }
             [IO.File]::WriteAllBytes((Join-Path $workspacePath 'reservation.json'), $show.bytes)
             $hashes = @{}; foreach ($name in ($files + @('terraform.rc', 'backend.json', 'inputs.tfvars.json', 'reservation.tfplan', 'reservation.json'))) { $hashes[$name] = Get-LifecycleFileHash (Join-Path $workspacePath $name) }
             $version = Invoke-ReservationTerraform @('version', '-json')
@@ -109,6 +139,15 @@ try {
                 Invoke-ReservationTerraform @('apply', '-input=false', '-lock-timeout=60s', '-no-color', 'reservation.tfplan') | Out-Null
             }
             $outputs = (Invoke-ReservationTerraform @('output', '-json')).text | ConvertFrom-Json -AsHashtable -Depth 32
+            if ($aws) {
+                # The role is deterministic: the definition already names it, so nothing provisional is resolved.
+                if ($outputs.role_arn.value -cne $inventory.target.roleArn -or $outputs.name_prefix.value -cne (Get-AwsEphemeralNamePrefix $model) -or
+                    $outputs.github_environment.value -cne "$($inventory.environment)-$($inventory.instance.id)") { throw 'lifecycle.ephemeral.bindingsMismatch' }
+                $role = (Invoke-ReservationAws @('iam', 'get-role', '--role-name', (Get-AwsEphemeralRoleName $model))).Role
+                $instanceTag = @($role.Tags | Where-Object Key -CEQ 'hexagon:instance')
+                if ($role.Arn -cne $inventory.target.roleArn -or $instanceTag.Count -ne 1 -or $instanceTag[0].Value -cne $inventory.instance.id) { throw 'lifecycle.ephemeral.identityMismatch' }
+            }
+            else {
             $client = $outputs.identity.value.client_id
             if ([guid] $client -eq [guid]::Empty -or $outputs.container.value -cne $inventory.target.container -or $outputs.github_environment.value -cne "$($inventory.environment)-$($inventory.instance.id)") { throw 'lifecycle.ephemeral.bindingsMismatch' }
             $model.inventory.target.clientId = $client
@@ -116,6 +155,7 @@ try {
             if ($identity.exitCode -ne 0) { throw 'lifecycle.ephemeral.identityUnavailable' }
             $identity = $identity.text | ConvertFrom-Json -AsHashtable
             if ($identity.clientId -ine $client -or $identity.tenantId -ine $inventory.target.tenantId -or $identity.principalId -ine $outputs.identity.value.principal_id) { throw 'lifecycle.ephemeral.identityMismatch' }
+            }
             Write-ReservationJson 'resolved-definition.json' $model
             if ($Mode -ceq 'GitHub') { Set-EphemeralGithubProtection $model -Confirm:$false; $status = 'Configured' }
             elseif ($Mode -ceq 'Verify') { Get-EphemeralGithubProtection $model | Out-Null; $status = 'PreparedForDiagnostic' }

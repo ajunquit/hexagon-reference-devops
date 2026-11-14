@@ -10,6 +10,17 @@ internal static class KeycloakDatabaseBootstrapper
     {
         // The role is parsed again at the mutation boundary; credentials never enter the public JSON.
         settings = KeycloakDatabaseSettings.Parse(System.Text.Json.JsonSerializer.Serialize(settings), common);
+        await PrepareAsync(database, common.Database, settings.Role, password, cancellationToken);
+    }
+
+    /// <summary>Creates or keeps the identity role and its schema. The role must already be validated by the caller.</summary>
+    public static async Task PrepareAsync(NpgsqlConnection database, string databaseName, string identityRole, string password,
+        CancellationToken cancellationToken)
+    {
+        if (!Regex.IsMatch(identityRole, "^[a-z][a-z0-9_-]{0,62}$") || !Regex.IsMatch(databaseName, "^[a-z][a-z0-9_-]{0,62}$"))
+        {
+            throw new InvalidOperationException("Invalid identity database identifiers.");
+        }
         if (!Regex.IsMatch(password, "^[A-Za-z0-9]{32,128}$"))
         {
             throw new InvalidOperationException("Identity database credentials must be 32 to 128 alphanumeric characters.");
@@ -29,16 +40,16 @@ internal static class KeycloakDatabaseBootstrapper
             );
             """, database, transaction))
         {
-            ownership.Parameters.AddWithValue("role", settings.Role);
+            ownership.Parameters.AddWithValue("role", identityRole);
             await using var reader = await ownership.ExecuteReaderAsync(cancellationToken);
             await reader.NextResultAsync(cancellationToken);
             await reader.ReadAsync(cancellationToken);
             if (reader.GetBoolean(0)) { throw new InvalidOperationException("Identity database ownership conflict."); }
         }
-        var role = '"' + settings.Role + '"';
+        var role = '"' + identityRole + '"';
         await using (var exists = new NpgsqlCommand("SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = @role)", database, transaction))
         {
-            exists.Parameters.AddWithValue("role", settings.Role);
+            exists.Parameters.AddWithValue("role", identityRole);
             if (!(bool)(await exists.ExecuteScalarAsync(cancellationToken))!)
             {
                 await using var create = new NpgsqlCommand($"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", database, transaction);
@@ -50,12 +61,12 @@ internal static class KeycloakDatabaseBootstrapper
             SET LOCAL password_encryption = 'scram-sha-256';
             ALTER ROLE {role} PASSWORD '{password}';
             GRANT {role} TO CURRENT_USER WITH INHERIT TRUE, SET TRUE;
-            REVOKE ALL ON DATABASE "{common.Database}" FROM PUBLIC;
-            GRANT CONNECT ON DATABASE "{common.Database}" TO {role};
+            REVOKE ALL ON DATABASE "{databaseName}" FROM PUBLIC;
+            GRANT CONNECT ON DATABASE "{databaseName}" TO {role};
             REVOKE CREATE ON SCHEMA public FROM PUBLIC;
             CREATE SCHEMA IF NOT EXISTS keycloak AUTHORIZATION {role};
             REVOKE ALL ON SCHEMA keycloak FROM PUBLIC;
-            ALTER ROLE {role} IN DATABASE "{common.Database}" SET search_path = keycloak;
+            ALTER ROLE {role} IN DATABASE "{databaseName}" SET search_path = keycloak;
             GRANT {role} TO CURRENT_USER WITH INHERIT FALSE, SET FALSE;
             """, database, transaction);
         await prepare.ExecuteNonQueryAsync(cancellationToken);

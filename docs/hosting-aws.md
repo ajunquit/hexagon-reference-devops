@@ -22,14 +22,46 @@ separado; la mensajería AWS SNS/SQS vive en su propio módulo.
 - un bucket S3 privado para la SPA y una distribución CloudFront con HTTPS por defecto, la SPA en la
   ruta por defecto (con fallback por CloudFront Function) y `/api/*` hacia el ALB.
 
+## Entradas y raíces
+
+`terraform/environments/{dev,staging,prod}/hosting-aws` componen el módulo con un backend S3 y una
+key exclusiva, como `hexagon-example/dev/hosting-aws.tfstate`. Cada raíz acepta solo su ambiente y
+fija el proveedor en la cuenta declarada (`allowed_account_ids`).
+
+`AwsHostingPolicy` v1 declara la cuenta, la región, la red, las tallas y los bindings de cada
+workload. Véase `examples/aws-hosting-policy.json`, sin secretos. Fargate se expresa en unidades de
+CPU y MiB (desde `256` / `512`); las tallas de base de datos y logs son opcionales y, si se omiten,
+toman los mínimos del módulo. Las credenciales van en `secret_references` como ARN de Secrets
+Manager. Keycloak integrado declara solo imagen, realm y usuario inicial: sus secretos los crea el
+módulo vacíos.
+
+```powershell
+pwsh ./scripts/Export-AwsHostingInputs.ps1 -Descriptor <descriptor.json> `
+  -Release <release.json> -Policy <aws-hosting-policy.json> `
+  -Output ./terraform/environments/dev/hosting-aws/generated.auto.tfvars.json
+```
+
+La exportación aplica las mismas comprobaciones que la de Azure (fuentes fijadas, workloads,
+puertos, migración, identidad y mensajería). Cada imagen pasa a
+`<cuenta>.dkr.ecr.<región>.amazonaws.com/<name_prefix>/<artefacto>@sha256:<digest>`, con el mismo
+digest del release. La activación empieza en `false`, y el archivo generado no se confirma.
+
 ## Orden de activación
 
 1. **Infraestructura:** sin tareas. La entrega copia las imágenes a ECR por digest.
-2. **`maintenance_jobs_enabled`:** crea las definiciones `database-access`, `migrations` y, con
-   Keycloak, `keycloak-database`. La entrega las ejecuta una vez, en ese orden, con `ecs:RunTask`
-   y la red de la salida `task_network`. `database-access` usa el secreto administrador de RDS,
-   crea un usuario por workload y otro de mantenimiento, y escribe sus cadenas de conexión en los
-   secretos vacíos.
+2. **`maintenance_jobs_enabled`:** crea las definiciones de las tareas de mantenimiento. La entrega
+   las ejecuta una vez, en este orden, con `ecs:RunTask` y la red de la salida `task_network`
+   ([ADR 0024](adr/0024-credenciales-de-base-de-datos-en-aws.md)):
+   1. `database-credentials`, con el usuario maestro de RDS: crea un usuario de mantenimiento, que
+      pasa a ser dueño de la base, y un usuario por workload. Escribe sus cadenas de conexión en
+      los secretos vacíos.
+   2. `migrations`, con el usuario de mantenimiento.
+   3. `database-access`, con el usuario de mantenimiento: concede los roles de runtime.
+   4. Con Keycloak, `keycloak-database`: su rol, su esquema y la contraseña de su administrador
+      inicial.
+
+   Las credenciales las genera la tarea; ningún operador las introduce. Si un secreto ya tiene
+   valor, se **conserva**: repetir las tareas no rota nada.
 3. **`keycloak_rollout_enabled`** (solo dev con Keycloak integrado) y
    **`application_rollout_enabled`:** crean los servicios, con autoescalado por CPU cuando
    `max_replicas` supera a `min_replicas`.
@@ -57,13 +89,11 @@ tienen capa gratuita.
 
 ## Pendiente
 
-- Raíces `environments/{dev,staging,prod}/hosting-aws` y exportación de entradas desde los
-  contratos de las aplicaciones.
-- Variante AWS de `Hexagon.Database.Bootstrap`: usuarios con contraseña y escritura en Secrets
-  Manager.
 - Entrega (copia OCI por digest, tareas de mantenimiento, rollout, publicación de la SPA e
   invalidación de CloudFront) y Genesis/Apocalypse en AWS.
+- Rotación explícita de credenciales, cuando el dueño la ordene.
 - Comprobar en la validación real que el backend usa la contraseña de la cadena de conexión y no
-  la credencial de Azure, y que Keycloak funciona bajo `/auth` detrás de CloudFront.
+  la credencial de Azure, que el maestro de RDS puede crear el usuario de mantenimiento con
+  `BYPASSRLS` y transferirle la base, y que Keycloak funciona bajo `/auth` detrás de CloudFront.
 
 Este módulo no despliega nada por sí mismo: las pruebas usan proveedores simulados.

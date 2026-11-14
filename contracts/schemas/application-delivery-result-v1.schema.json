@@ -5,11 +5,18 @@
   "properties": {
     "apiVersion": { "const": "hexagon.ec/application-delivery-result/v1" },
     "status": { "enum": ["Blocked", "Unverified", "Validated", "Prepared", "Completed"] },
-    "stage": { "enum": ["Validate", "Artifacts", "PrepareMaintenance", "ApplyMaintenance", "KeycloakDatabase", "PrepareIdentity", "ApplyIdentity", "Migrations", "DatabaseAccess", "PrepareActivation", "ApplyActivation", "PublishWeb", "VerifyServing", "PrepareAcceptance", "Acceptance"] },
+    "stage": { "enum": ["Validate", "Artifacts", "PrepareMaintenance", "ApplyMaintenance", "DatabaseCredentials", "KeycloakDatabase", "PrepareIdentity", "ApplyIdentity", "Migrations", "DatabaseAccess", "PrepareActivation", "ApplyActivation", "PublishWeb", "VerifyServing", "PrepareAcceptance", "Acceptance"] },
     "applicationVerified": { "const": false },
     "details": {
       "type": "object", "additionalProperties": false,
       "properties": {
+        "provider": { "enum": ["azure", "aws"] },
+        "accountId": { "type": "string", "pattern": "^[0-9]{12}$" },
+        "region": { "type": "string", "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$" },
+        "roleArn": { "type": "string", "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_-]{1,64}$" },
+        "executionId": { "type": "string", "pattern": "^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task/[A-Za-z0-9_-]+/[0-9a-f]{32}$" },
+        "invalidationId": { "type": "string", "pattern": "^[A-Z0-9]{8,32}$" },
+        "filesPublished": { "type": "integer", "minimum": 1 },
         "clientId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
         "tenantId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
         "subscriptionId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },

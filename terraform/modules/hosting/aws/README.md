@@ -9,14 +9,17 @@ expone los roles de tarea para que sus políticas se adjunten.
 - **Sin NAT:** las tareas usan subredes públicas con IP pública y un security group que solo acepta
   el balanceador; la base de datos usa subredes privadas sin ruta a internet.
 - **Credenciales:** RDS administra la contraseña maestra en Secrets Manager. Los secretos de las
-  cadenas de conexión se crean vacíos; la tarea `database-access` los rellena. Terraform nunca
-  conoce un valor.
+  cadenas de conexión se crean vacíos; la tarea `database-credentials` los rellena y conserva los
+  que ya tienen valor ([ADR 0024](../../../../docs/adr/0024-credenciales-de-base-de-datos-en-aws.md)).
+  Terraform nunca conoce un valor.
 - **Activación por etapas:** el estado inicial no crea tareas; `maintenance_jobs_enabled` crea las
   definiciones de mantenimiento, que la entrega ejecuta con `ecs:RunTask`, y
   `application_rollout_enabled` crea los servicios.
 - **Tallas mínimas por defecto:** `db.t4g.micro`, 20 GB, una zona, backup de un día fuera de prod y
-  logs de siete días. Las tallas de Fargate las fija cada root.
+  logs de siete días. Una talla que llega como `null` toma ese mínimo; las de Fargate las fija la
+  política de cada ambiente.
 
 Las imágenes deben vivir en ECR de la misma cuenta y región, en repositorios
 `<name_prefix>/<artefacto>`, fijadas por digest. `terraform test` usa proveedores simulados y no
-aprovisiona recursos. Consulta la [guía de hosting AWS](../../../../docs/hosting-aws.md).
+aprovisiona recursos. Las raíces `terraform/environments/<ambiente>/hosting-aws` lo componen con
+las entradas de `Export-AwsHostingInputs.ps1`. Consulta la [guía de hosting AWS](../../../../docs/hosting-aws.md).

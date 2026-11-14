@@ -56,7 +56,6 @@
         "additionalProperties": false,
         "required": [
           "id",
-          "resourceGroup",
           "stateLineage",
           "stateSerial",
           "resources"
@@ -95,11 +94,18 @@
                 "id": {
                   "type": "string",
                   "maxLength": 2048,
-                  "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/[^ ]+$"
+                  "anyOf": [
+                    {
+                      "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/[^ ]+$"
+                    },
+                    {
+                      "pattern": "^aws:[0-9]{12}:[a-z]{2}(-[a-z]+)+-[0-9]:aws_[a-z0-9_]+:[^ ]+$"
+                    }
+                  ]
                 },
                 "type": {
                   "type": "string",
-                  "pattern": "^azurerm_[a-z0-9_]+$"
+                  "pattern": "^(azurerm|aws)_[a-z0-9_]+$"
                 },
                 "address": {
                   "type": "string",
@@ -108,8 +114,24 @@
                 }
               }
             }
+          },
+          "namePrefix": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,18}$"
           }
-        }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "resourceGroup"
+            ]
+          },
+          {
+            "required": [
+              "namePrefix"
+            ]
+          }
+        ]
       }
     }
   }

@@ -19,6 +19,7 @@ Import-Module (Join-Path $PSScriptRoot 'EnvironmentWorkflow.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'EphemeralEnvironment.psm1')
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentLifecycle.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AzureEnvironmentStore.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AwsEnvironmentStore.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
 $status = 'Blocked'; $code = $null; $details = @{}
@@ -27,6 +28,7 @@ try {
     $definitionPath = Join-Path $repository ".config/environments/$Environment/$InstanceId/definition.json"
     $definition = Assert-EphemeralTrackedDefinition $definitionPath $DefinitionSha256 $Environment $InstanceId $Operation
     $inventory = $definition.inventory
+    $aws = $inventory.target.ContainsKey('accountId')
     if ($WhatIfPreference) { $status = 'Unverified' }
     elseif ($PSCmdlet.ShouldProcess("$($inventory.product)/$Environment/$InstanceId", "$Mode $Operation stage")) {
         $expectedWorkflow = $(if ($Operation -ceq 'Create') { 'genesis' } else { 'apocalypse' })
@@ -35,21 +37,35 @@ try {
         Assert-EphemeralRepository $definition
         $githubEnvironment = Get-EphemeralGithubProtection $definition -SkipBindings
         if ($Mode -ceq 'Validate') {
-            $details = @{ clientId = $inventory.target.clientId; tenantId = $inventory.target.tenantId; subscriptionId = $inventory.target.subscriptionId; githubEnvironment = $githubEnvironment }
+            $details = $(if ($aws) { @{ provider = 'aws'; accountId = $inventory.target.accountId; region = $inventory.target.region; roleArn = $inventory.target.roleArn; githubEnvironment = $githubEnvironment } }
+                else { @{ provider = 'azure'; clientId = $inventory.target.clientId; tenantId = $inventory.target.tenantId; subscriptionId = $inventory.target.subscriptionId; githubEnvironment = $githubEnvironment } })
             $status = 'Validated'
         }
         else {
-            foreach ($pair in @{ AZURE_CLIENT_ID = $inventory.target.clientId; AZURE_TENANT_ID = $inventory.target.tenantId; AZURE_SUBSCRIPTION_ID = $inventory.target.subscriptionId }.GetEnumerator()) {
+            foreach ($pair in (Get-EphemeralGithubBindings $definition).GetEnumerator()) {
                 if ([Environment]::GetEnvironmentVariable($pair.Key) -ine $pair.Value) { throw 'lifecycle.ephemeral.githubVariableDrift' }
             }
             $directory = New-EphemeralWorkspace (Join-Path $repository "artifacts/lifecycle-$([guid]::NewGuid().ToString('N'))") -Confirm:$false
             $initialPath = Join-Path $directory 'initial-inventory.json'
             [IO.File]::WriteAllText($initialPath, (ConvertTo-PlatformBootstrapJson $inventory) + "`n")
             $workspace = Join-Path $directory 'work'
-            $entry = Join-Path $PSScriptRoot 'Invoke-AzureEnvironment.ps1'
+            $entry = Join-Path $PSScriptRoot $(if ($aws) { 'Invoke-AwsEnvironment.ps1' } else { 'Invoke-AzureEnvironment.ps1' })
+            $resultVersion = $(if ($aws) { 'hexagon.ec/aws-environment-result/v1' } else { 'hexagon.ec/azure-environment-result/v1' })
             $profileDirectory = Split-Path -Parent $definitionPath
             $port = {
                 param($action)
+                if ($action -ceq 'Probe' -and $aws) {
+                    $caller = Invoke-LifecycleCommand aws @('sts', 'get-caller-identity', '--region', $inventory.target.region, '--output', 'json') -TimeoutSeconds 45
+                    if ($caller.exitCode -ne 0) { throw 'lifecycle.aws.accountUnavailable' }
+                    $identity = $caller.text | ConvertFrom-Json -AsHashtable
+                    $context = New-AwsLifecycleContext $inventory $identity.Arn $identity.Account
+                    try {
+                        Enter-AwsLifecycleLease $context -Confirm:$false
+                        $journal = Get-AwsLifecycleJournal $context
+                        return @{ status = 'Probed'; inventory = $(if ($null -eq $journal) { $null } else { $journal.inventory }) }
+                    }
+                    finally { Exit-AwsLifecycleLease $context -Confirm:$false }
+                }
                 if ($action -ceq 'Probe') {
                     $context = New-AzureLifecycleContext $inventory
                     try {
@@ -80,7 +96,7 @@ try {
                 $native = Invoke-LifecycleCommand pwsh $arguments $repository -TimeoutSeconds 1800
                 try { $response = $native.text | ConvertFrom-Json -AsHashtable -Depth 16 }
                 catch { throw 'lifecycle.ephemeral.adapterResultInvalid' }
-                if ($response.apiVersion -cne 'hexagon.ec/azure-environment-result/v1' -or $response.applicationVerified -isnot [bool] -or $response.applicationVerified -ne $false) { throw 'lifecycle.ephemeral.adapterResultInvalid' }
+                if ($response.apiVersion -cne $resultVersion -or $response.applicationVerified -isnot [bool] -or $response.applicationVerified -ne $false) { throw 'lifecycle.ephemeral.adapterResultInvalid' }
                 if ($native.exitCode -ne 0 -and $response.status -cne 'Failed') {
                     if ($response.code -cmatch '^lifecycle[.][A-Za-z0-9.]+$') { throw $response.code }
                     throw 'lifecycle.ephemeral.adapterFailed'
@@ -93,7 +109,8 @@ try {
             if ($env:GITHUB_STEP_SUMMARY) {
                 $summary = "Operation: $Operation; environment: $Environment; instance: $InstanceId; root: $RootId; status: $status.`n"
                 if ($details.ContainsKey('reviewSha256')) { $summary += "Reviewed plan hash: $($details.reviewSha256)`nApply requires a separate dispatch after reviewing the private plan in Blob.`n" }
-                $summary += "Application verification: pending. Inventory and private plans remain in the instance Blob container.`n"
+                $store = $(if ($aws) { 'the instance prefix of the S3 state bucket' } else { 'the instance Blob container' })
+                $summary += "Application verification: pending. Inventory and private plans remain in $store.`n"
                 Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
             }
         }

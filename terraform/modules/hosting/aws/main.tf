@@ -28,8 +28,9 @@ locals {
       options   = { awslogs-group = aws_cloudwatch_log_group.this.name, awslogs-region = data.aws_region.current.region, awslogs-stream-prefix = id }
     }
   }
-  # The database-access task creates one login role per workload and writes its connection string to the
-  # empty secret below. Credentials never pass through Terraform plans or state.
+  # The database-credentials task creates one login role per workload, plus the maintenance login that
+  # runs the migrations, and writes each connection string to its empty secret below; a secret that
+  # already has a value keeps it (ADR 0024). Credentials never pass through Terraform plans or state.
   bootstrap = merge({
     provider    = "aws", host = local.database_host, port = 5432, database = var.database_name,
     maintenance = { role = "${local.role_prefix}_maintenance", secret = aws_secretsmanager_secret.maintenance_connection.arn }
@@ -42,8 +43,17 @@ locals {
     { name = "HEXAGON_DATABASE_ADMIN_USERNAME", valueFrom = "${local.administrator_secret}:username::" },
     { name = "HEXAGON_DATABASE_ADMIN_PASSWORD", valueFrom = "${local.administrator_secret}:password::" }
   ]
-  auth_environment = { Auth__Authority = local.auth_authority, Auth__Audience = var.auth.audience, Auth__ApiScope = var.auth.api_scope }
+  # The tasks that run after database-credentials connect with the maintenance login, not the master user.
+  maintenance_login = [{ name = "HEXAGON_DATABASE_MAINTENANCE", valueFrom = aws_secretsmanager_secret.maintenance_connection.arn }]
+  auth_environment  = { Auth__Authority = local.auth_authority, Auth__Audience = var.auth.audience, Auth__ApiScope = var.auth.api_scope }
+  # Delivery runs them once, in this order: database-credentials, migrations, database-access.
   jobs = {
+    database-credentials = {
+      image       = var.bootstrap_image
+      command     = ["--prepare-credentials"]
+      environment = { HEXAGON_DATABASE_BOOTSTRAP = jsonencode(local.bootstrap) }
+      secrets     = local.administrator_secrets
+    }
     migrations = {
       image       = var.workloads[var.migration_workload].image
       command     = ["--migrate-only"]
@@ -54,7 +64,7 @@ locals {
       image       = var.bootstrap_image
       command     = []
       environment = { HEXAGON_DATABASE_BOOTSTRAP = jsonencode(local.bootstrap) }
-      secrets     = local.administrator_secrets
+      secrets     = local.maintenance_login
     }
   }
   acceptance_jobs = var.acceptance_fixture == null ? {} : {
@@ -264,23 +274,25 @@ resource "aws_cloudwatch_log_group" "this" {
 
 # One task role per workload, without permissions: messaging policies attach to these roles.
 resource "aws_iam_role" "workload" {
-  for_each           = var.workloads
-  name               = "${var.name_prefix}-${substr(sha1(each.key), 0, 10)}"
-  assume_role_policy = local.task_trust
-  tags               = local.tags
+  for_each             = var.workloads
+  name                 = "${var.name_prefix}-${substr(sha1(each.key), 0, 10)}"
+  assume_role_policy   = local.task_trust
+  permissions_boundary = var.workload_boundary_arn
+  tags                 = local.tags
 }
 resource "aws_iam_role" "maintenance" {
-  name               = "${var.name_prefix}-maintenance"
-  assume_role_policy = local.task_trust
-  tags               = local.tags
+  name                 = "${var.name_prefix}-maintenance"
+  assume_role_policy   = local.task_trust
+  permissions_boundary = var.workload_boundary_arn
+  tags                 = local.tags
 }
 resource "aws_iam_role_policy" "maintenance_writes_connections" {
-  name = "write-connection-secrets"
+  name = "keep-or-write-connection-secrets"
   role = aws_iam_role.maintenance.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow", Action = ["secretsmanager:PutSecretValue", "secretsmanager:DescribeSecret"]
+      Effect = "Allow", Action = ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:DescribeSecret"]
       Resource = concat([for secret in aws_secretsmanager_secret.workload_connection : secret.arn], [aws_secretsmanager_secret.maintenance_connection.arn],
       [for secret in aws_secretsmanager_secret.keycloak : secret.arn])
     }]
@@ -288,10 +300,11 @@ resource "aws_iam_role_policy" "maintenance_writes_connections" {
 }
 # Execution roles pull images, write logs and read only the secrets of their own containers.
 resource "aws_iam_role" "execution" {
-  for_each           = local.execution_secrets
-  name               = "${var.name_prefix}-run-${substr(sha1(each.key), 0, 10)}"
-  assume_role_policy = local.task_trust
-  tags               = local.tags
+  for_each             = local.execution_secrets
+  name                 = "${var.name_prefix}-run-${substr(sha1(each.key), 0, 10)}"
+  assume_role_policy   = local.task_trust
+  permissions_boundary = var.workload_boundary_arn
+  tags                 = local.tags
 }
 resource "aws_iam_role_policy_attachment" "execution" {
   for_each   = local.execution_secrets

@@ -9,7 +9,7 @@ locals {
       image       = var.bootstrap_image
       command     = ["--prepare-keycloak"]
       environment = { HEXAGON_DATABASE_BOOTSTRAP = jsonencode(merge(local.bootstrap, { purpose = "keycloak", keycloak = { role = local.keycloak_role, passwordSecret = aws_secretsmanager_secret.keycloak["database"].arn, bootstrapSecret = aws_secretsmanager_secret.keycloak["bootstrap"].arn } })) }
-      secrets     = local.administrator_secrets
+      secrets     = local.maintenance_login
     }
   } : {}
 }
@@ -24,10 +24,11 @@ resource "aws_secretsmanager_secret" "keycloak" {
 }
 
 resource "aws_iam_role" "keycloak" {
-  count              = local.keycloak_enabled ? 1 : 0
-  name               = "${var.name_prefix}-keycloak"
-  assume_role_policy = local.task_trust
-  tags               = local.tags
+  count                = local.keycloak_enabled ? 1 : 0
+  name                 = "${var.name_prefix}-keycloak"
+  assume_role_policy   = local.task_trust
+  permissions_boundary = var.workload_boundary_arn
+  tags                 = local.tags
 }
 
 resource "aws_lb_target_group" "keycloak" {

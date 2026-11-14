@@ -41,8 +41,24 @@ pwsh ./scripts/Test-EnvironmentInventory.ps1 -Inventory ./examples/environment-i
 El orden es hosting → messaging para alta y messaging → hosting para baja. El grafo se valida:
 sin duplicados, ciclos ni dependencias ausentes; los componentes web/backend requieren hosting y
 mensajería requiere backend. Si ambos roots existen,
-mensajería depende de hosting. La primera composición admite solo los dos adaptadores Azure.
-Los adaptadores AWS/RabbitMQ siguen separados y su coordinación cloud es trabajo posterior.
+mensajería depende de hosting. El motor admite dos composiciones, sin mezclarlas en un inventario:
+
+- **Azure:** `AzureHosting` y `AzureServiceBus`, con un resource group por root.
+- **AWS** ([ADR 0025](adr/0025-ciclo-de-ambiente-en-aws.md)): `AwsHosting` y `AwsSnsSqs`, con un
+  target de cuenta, región, rol y bucket de estado, y un **prefijo corto** común a los dos roots. En
+  una instancia efímera, el prefijo es una base de 3 a 12 caracteres más `-` y seis caracteres
+  hexadecimales del SHA-256 de `<producto>/<ambiente>/<instancia>`; en una persistente, solo la base.
+  Ver `examples/environment-inventory-aws.json`.
+
+  Cada recurso se registra como `aws:<cuenta>:<región>:<tipo>:<id>`, con el tipo y el ID de
+  Terraform. El motor rechaza:
+  - una cuenta o región ajenas;
+  - el proveedor OIDC, usuarios y claves IAM;
+  - el bucket de estado y el rol de la reserva;
+  - en los planes, un ARN de otra cuenta o región y unas etiquetas `hexagon:*` que no sean de la
+    instancia.
+
+RabbitMQ sigue sin coordinación del ciclo.
 
 Para crear un inventario privado nuevo, adapta la definición inicial al producto y usa un
 directorio existente bajo artifacts/, con permisos restringidos al operador:

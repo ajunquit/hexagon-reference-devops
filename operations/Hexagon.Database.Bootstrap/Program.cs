@@ -10,12 +10,18 @@ internal static class Program
     {
         try
         {
+            var json = Environment.GetEnvironmentVariable("HEXAGON_DATABASE_BOOTSTRAP")
+                ?? throw new InvalidOperationException("Missing database bootstrap settings.");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            if (AwsBootstrapSettings.IsAws(json))
+            {
+                Console.WriteLine(await AwsMaintenance.RunAsync(args, json, timeout.Token));
+                return 0;
+            }
             var identity = args.SequenceEqual(["--prepare-keycloak"]);
             if (args.Length != 0 && !identity) { throw new InvalidOperationException("Unknown database maintenance mode."); }
-            var settings = BootstrapSettings.Parse(Environment.GetEnvironmentVariable("HEXAGON_DATABASE_BOOTSTRAP")
-                ?? throw new InvalidOperationException("Missing database bootstrap settings."));
+            var settings = BootstrapSettings.Parse(json);
             if (identity != (settings.Purpose == "keycloak")) { throw new InvalidOperationException("Database maintenance purpose does not match its mode."); }
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             var credential = new ManagedIdentityCredential(ManagedIdentityId.FromUserAssignedClientId(settings.ClientId));
             var token = await credential.GetTokenAsync(new TokenRequestContext(["https://ossrdbms-aad.database.windows.net/.default"]), timeout.Token);
             async Task<NpgsqlConnection> OpenAsync(string database)

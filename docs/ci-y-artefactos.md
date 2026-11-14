@@ -128,12 +128,18 @@ las imágenes se leen sin extraer archivos. Para web y devops cambia ExpectedCom
 de build producen la evidencia, pero no se consideran una firma de procedencia.
 
 Los candidatos solo se conservan desde main, con commit/run ID/reintento en el nombre del artefacto
-y 30 días de retención. GitHub también identifica el contenedor ZIP subido con su propio digest;
-ese valor no sustituye el checksum del bundle ni el digest OCI. La evidencia de pruebas tiene
-7 días de retención. No hay descargas automáticas de un artefacto llamado latest.
+y 2 días de retención. GitHub también identifica el contenedor ZIP subido con su propio digest;
+ese valor no sustituye el checksum del bundle ni el digest OCI. La evidencia de pruebas también
+tiene 2 días de retención. No hay descargas automáticas de un artefacto llamado latest. Un
+candidato caducado se regenera relanzando la CI de main con `workflow_dispatch`.
 
 En DevOps, el job que construye el candidato depende de las tres integraciones de mensajería y de
-la de PostgreSQL: no publica un candidato si alguna de ellas falla.
+la de PostgreSQL: no publica un candidato si alguna de ellas falla. Para ahorrar minutos de
+Actions, esas integraciones solo se ejecutan cuando el cambio toca lo que prueban (`operations/`,
+`local/`, `contracts/`, `examples/`, `products/`, los scripts de mensajería, `global.json` o el
+propio `ci.yml`; la lista está en `scripts/CiScope.psm1`). Una ejecución manual o sin commit base
+comparable las ejecuta siempre. Un PR que solo cambia documentación (`*.md`, `docs/`) no ejecuta
+la CI; main sí la ejecuta y construye su candidato.
 
 ## Adopción y siguientes etapas
 

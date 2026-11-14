@@ -55,5 +55,23 @@ $rejected = $false
 try { Get-CiMessagingProviders -Root $tampered -ReadManifest $reader | Out-Null } catch { $rejected = $_.Exception.Message -like '*does not match*' }
 if (-not $rejected) { throw 'A manifest that differs from its descriptor must be rejected.' }
 
+# The integrations run when the change can alter them, or when the change is unknown.
+if (-not (Test-CiIntegrationChange -ChangedPaths $null)) { throw 'An unknown change must run every integration.' }
+foreach ($changed in @(
+    'operations/Hexagon.Messaging.Operations/AwsOperations.cs',
+    'scripts/LocalMessaging.psm1',
+    'scripts/Test-RabbitMqPolicy.ps1',
+    'scripts/AzureServiceBusContracts.psm1',
+    'products/hexagon-example/environments/dev/descriptor.json',
+    'tests/Test-LocalMessagingRuntime.ps1',
+    '.github/workflows/ci.yml',
+    'global.json')) {
+    if (-not (Test-CiIntegrationChange -ChangedPaths @('docs/README.md', $changed))) { throw "A change to '$changed' must run the integrations." }
+}
+foreach ($changed in @('terraform/modules/hosting/aws/main.tf', 'docs/ci-y-artefactos.md', '.github/workflows/delivery.yml', 'scripts/Invoke-AwsEnvironment.ps1', 'acceptance/package.json')) {
+    if (Test-CiIntegrationChange -ChangedPaths @($changed)) { throw "A change to '$changed' must not run the integrations." }
+}
+if (Test-CiIntegrationChange -ChangedPaths @()) { throw 'An empty change must not run the integrations.' }
+
 foreach ($path in @($template, $product, $apiOnly, $tampered)) { Remove-Item -LiteralPath $path -Recurse -Force }
 Write-Host 'CI scope tests passed.'

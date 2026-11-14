@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "status",
+    "mode",
+    "applicationVerified",
+    "details",
+    "code"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "hexagon.ec/aws-environment-result/v1"
+    },
+    "status": {
+      "enum": [
+        "Built",
+        "Initialized",
+        "Prepared",
+        "Restored",
+        "InputsUpdated",
+        "Verified",
+        "Destroyed",
+        "Failed",
+        "Blocked",
+        "Unverified",
+        "InputsBound",
+        "Quiesced"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "Build",
+        "Initialize",
+        "Prepare",
+        "Apply",
+        "Sync",
+        "Restore",
+        "UpdateInputs",
+        "BindMessaging",
+        "Quiesce"
+      ]
+    },
+    "applicationVerified": {
+      "const": false
+    },
+    "details": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inventoryPath": {
+          "type": "string"
+        },
+        "snapshotSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "reviewSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^lifecycle[.][A-Za-z0-9.]+$"
+    }
+  }
+}
