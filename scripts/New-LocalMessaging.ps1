@@ -72,7 +72,7 @@ function Write-GeneratedText {
     try {
         [IO.File]::WriteAllText($temporaryPath, $Text.TrimEnd() + "`n", [Text.UTF8Encoding]::new($false))
         if (-not $IsWindows -and $Path.EndsWith('.sh', [StringComparison]::Ordinal)) {
-            # LocalStack only discovers executable initialization hooks on Unix hosts.
+            # Floci only runs executable initialization hooks on Unix hosts.
             $mode = [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite -bor [IO.UnixFileMode]::UserExecute -bor [IO.UnixFileMode]::GroupRead -bor [IO.UnixFileMode]::GroupExecute -bor [IO.UnixFileMode]::OtherRead -bor [IO.UnixFileMode]::OtherExecute
             [IO.File]::SetUnixFileMode($temporaryPath, $mode)
         }

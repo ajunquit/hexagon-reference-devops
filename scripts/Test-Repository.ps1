@@ -59,7 +59,9 @@ $requiredPaths = @(
     'scripts/Invoke-AwsEnvironment.ps1',
     'scripts/AwsLifecycleInputs.psm1',
     'contracts/schemas/aws-environment-result-v1.schema.json',
-    'tests/Invoke-AwsEmulatorRoots.ps1',
+    'tests/Invoke-FlociRoots.ps1',
+    'docs/pruebas-locales-floci.md',
+    'docs/adr/0026-floci-como-plataforma-local.md',
     'scripts/TerraformAwsLifecycle.psm1',
     'scripts/AwsLifecycleResources.psm1',
     'scripts/AwsEnvironmentStore.psm1',
@@ -345,8 +347,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Application delivery tests failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Integrated identity delivery tests failed.' }
 & pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-Acceptance.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Acceptance consent and cleanup protocol tests failed.' }
-& node --test (Join-Path $repositoryRoot 'acceptance/browser.test.mjs')
-if ($LASTEXITCODE -ne 0) { throw 'Chromium acceptance protocol tests failed. Install acceptance dependencies and Chromium first.' }
+& node --test (Join-Path $repositoryRoot 'acceptance/browser.test.mjs') (Join-Path $repositoryRoot 'acceptance/cloudfront-function.test.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Browser or CloudFront Function tests failed. Install acceptance dependencies and Chromium first.' }
 # Isolate HTTP fixtures from modules cached by the lifecycle suites in this process.
 & pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-StaticWebPublication.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Static web publication and backend health tests failed.' }

@@ -94,3 +94,11 @@ El operador ejecuta el bootstrap persistente con el comando documentado y planes
 agente no lo aplica a una cuenta real sin un destino concreto autorizado. El diagnóstico manual
 requiere main y las protecciones de cada Environment. Genesis/Apocalypse admiten por ahora solo
 instancias efímeras dev/staging y no acreditan aplicaciones operativas ni cierre de 9C.
+
+## Continuidad y recursos locales
+
+Para coordinación transversal, leer [INICIO.md](https://github.com/ajunquit/hexagon-continuity/blob/main/INICIO.md)
+en el repositorio privado de continuidad. El relevo se escribe allí siguiendo la skill compartida.
+Test-Repository requiere Python 3.10+ y comprueba presupuestos de espacio y caché. Antes de crear
+worktrees o restaurar dependencias, aplicar [recursos locales](docs/recursos-locales.md) y su helper.
+El inicio de Terraform usa el coordinador del helper para serializar la caché y compartir proveedores.
