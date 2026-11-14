@@ -132,5 +132,41 @@ Assert-Rejected { Invoke-AwsDeliveryMaintenance $context 'database-credentials' 
 $foreign = @{} + $failed; $foreign.status = 'Running'; $script:exit = 0
 Assert-Rejected { Invoke-AwsDeliveryMaintenance $context 'database-credentials' $spec $foreign $persist 30 0 -Confirm:$false } 'lifecycle.delivery.executionChanged'
 
+# Messaging bindings: the exact SNS/SQS keys of each workload are merged into a copy of the hosting inputs.
+$topic = 'arn:aws:sns:us-east-1:123456789012:hexagon-example-dev-integration-events'
+$queue = 'https://sqs.us-east-1.amazonaws.com/123456789012/hexagon-example-dev-worker'
+$bindingInputs = @{ workloads = @{ api = @{ environment = @{ Existing = 'kept' }; secret_references = @{} }; worker = @{ environment = @{}; secret_references = @{} } } }
+$bindings = @{ api = @{ 'Messaging__Aws__Sns__Destinations__integration-events__TopicArn' = $topic; 'Messaging__Aws__Sns__Destinations__integration-events__Region' = 'us-east-1' }
+    worker = @{ 'Messaging__Aws__Sqs__Consumers__worker__QueueUrl' = $queue; 'Messaging__Aws__Sqs__Consumers__worker__RetryVisibilityTimeoutSeconds' = '30' } }
+$bound = Add-AwsMessagingBindings $bindingInputs $bindings
+Assert-True ($bound.workloads.api.environment['Messaging__Aws__Sns__Destinations__integration-events__TopicArn'] -ceq $topic -and $bound.workloads.api.environment.Existing -ceq 'kept' -and
+    $bound.workloads.worker.environment['Messaging__Aws__Sqs__Consumers__worker__QueueUrl'] -ceq $queue -and $bindingInputs.workloads.api.environment.Count -eq 1) 'Bindings are merged into a copy of the inputs.'
+Assert-Rejected { Add-AwsMessagingBindings $bindingInputs @{ ghost = @{ 'Messaging__Aws__Sns__Destinations__x__Region' = 'us-east-1' } } } 'lifecycle.delivery.bindingWorkloadUnknown'
+Assert-Rejected { Add-AwsMessagingBindings $bindingInputs @{ api = @{ 'Messaging__Aws__Sqs__Consumers__worker__Password' = 'x' } } } 'lifecycle.delivery.bindingInvalid'
+Assert-Rejected { Add-AwsMessagingBindings $bindingInputs @{ api = @{ 'Messaging__Aws__Sns__Destinations__x__TopicArn' = 'arn with spaces' } } } 'lifecycle.delivery.bindingInvalid'
+$conflict = @{ workloads = @{ api = @{ environment = @{ 'Messaging__Aws__Sns__Destinations__x__Region' = 'eu-west-1' }; secret_references = @{} } } }
+Assert-Rejected { Add-AwsMessagingBindings $conflict @{ api = @{ 'Messaging__Aws__Sns__Destinations__x__Region' = 'us-east-1' } } } 'lifecycle.delivery.bindingConflict'
+Assert-Rejected { Add-AwsMessagingBindings $bindingInputs $null } 'lifecycle.delivery.messagingBindingsUnavailable'
+
+# Maintenance reads the bindings only from the exact verified messaging snapshot.
+$bindingContext = $context.Clone(); $bindingContext.inventory = Copy-Value $context.inventory
+$messagingRoot = @($bindingContext.inventory.roots | Where-Object id -CEQ 'messaging')[0]
+$messagingRoot.status = 'Verified'; $messagingRoot.stateLineage = [guid]::NewGuid().ToString(); $messagingRoot.stateSerial = 2
+$bindingState = @{ version = 4; lineage = $messagingRoot.stateLineage; serial = 2; resources = @(); outputs = @{ aws_sns_sqs = @{ value = @{ workload_bindings = $bindings } } } }
+$script:objects[$messagingRoot.stateKey] = @{ bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $bindingState)); etag = '"bindings"' }
+$bound = Get-AwsDeliveryBoundInputs $bindingContext $bindingInputs
+Assert-True ($bound.workloads.api.environment['Messaging__Aws__Sns__Destinations__integration-events__TopicArn'] -ceq $topic) 'Maintenance receives verified messaging bindings.'
+$messagingRoot.stateSerial = 3
+Assert-Rejected { Get-AwsDeliveryBoundInputs $bindingContext $bindingInputs } 'lifecycle.delivery.messagingBindingsUnavailable'
+$messagingRoot.stateSerial = 2; $messagingRoot.stateLineage = [guid]::NewGuid().ToString()
+Assert-Rejected { Get-AwsDeliveryBoundInputs $bindingContext $bindingInputs } 'lifecycle.delivery.messagingBindingsUnavailable'
+$messagingRoot.status = 'Pending'
+Assert-Rejected { Get-AwsDeliveryBoundInputs $bindingContext $bindingInputs } 'lifecycle.delivery.messagingNotReady'
+$disabled = Copy-Value $bindingInputs; $disabled.messaging_enabled = $false
+Assert-Rejected { Get-AwsDeliveryBoundInputs $bindingContext $disabled } 'lifecycle.delivery.messagingUnexpected'
+$bindingContext.inventory.roots = @($bindingContext.inventory.roots | Where-Object id -CNE 'messaging')
+$bound = Get-AwsDeliveryBoundInputs $bindingContext $disabled
+Assert-True ($bound.workloads.api.environment.Count -eq 1 -and $bound.messaging_enabled -eq $false) 'Messaging-free maintenance preserves its inputs.'
+
 Exit-AwsLifecycleLease $context -Confirm:$false
 Write-Host "AWS application delivery tests passed: $($script:assertions) assertions; in-memory S3, AWS CLI and registry doubles."

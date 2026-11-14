@@ -13,7 +13,7 @@ incremento de la ADR. Nada de lo descrito aquí se ha ejecutado contra una cuent
 | 2b. Definición `EphemeralEnvironment` AWS, orquestación del bootstrap y diagnóstico de aislamiento | Integrado |
 | 3a. Custodia en S3: inventario, journal, snapshots y lease | Integrado |
 | 3b-1. Catálogo de tipos y sondas, lectura del estado Terraform y restos por etiqueta | Integrado |
-| 3b-2. Ejecución de Terraform, puerto del motor y prueba opcional contra AWS Emulator | Integrado |
+| 3b-2. Ejecución de Terraform y puerto del motor | Integrado |
 | 4. `genesis.yml` y `apocalypse.yml` con el proveedor de la definición, y `Quiesce` | Integrado |
 | 5a. Entrega AWS: imágenes a ECR, plan de mantenimiento y tareas de base de datos | Integrado |
 | 5b. Entrega AWS: identidad, activación, SPA en S3 con CloudFront, verificación y `delivery.yml` | Este documento |
@@ -185,30 +185,11 @@ exigirá en el 3b-2.
   servicio ECS con réplicas ni tareas en ejecución. Queda una evidencia inmutable en la custodia.
   `Quiesce`, que deja los servicios a cero, llega en el incremento 6.
 
-## Prueba opcional con AWS Emulator
+## Prueba local con Floci
 
-`tests/Invoke-AwsEmulatorRoots.ps1` aplica y destruye el root `hosting-aws` contra
-[AWS Emulator](https://docs.aws.amazon.com/emulator/latest/userguide/what-is-service.html) en Docker
-(decisión del dueño, 2026-11-12). No forma parte de la CI ni de `Test-Repository.ps1`:
-
-```powershell
-pwsh ./tests/Invoke-AwsEmulatorRoots.ps1 -EmulatorVersion <versión LTS publicada hace dos semanas o más>
-```
-
-El script hace lo siguiente:
-
-- **Imagen:** la construye en local con el paquete exacto de esa versión (lista en
-  `https://downloads.aws.com/aws-emulator/packages/aws-emulator/LTS/versions.json`).
-- **Arranque:** solo en `127.0.0.1` y con `--telemetry off`.
-- **Aislamiento:** quita del proceso las credenciales reales y trabaja en una copia de los roots con
-  backend local.
-- **Recorrido:** aplica el estado inicial, después el mantenimiento y el rollout, comprueba la
-  convergencia y destruye.
-- **Cierre:** muestra el resultado de cada paso y siempre detiene el contenedor.
-
-El emulador cubre sobre todo el **plano de control**: no ejecuta contenedores ECS ni el motor de
-RDS, y no evalúa IAM. Un fallo o una deriva pueden deberse a su fidelidad. Nunca sustituye a la
-validación en AWS (D-9C-AWS). La mensajería AWS se prueba en la CI con LocalStack.
+Los roots AWS se prueban en local con Floci, la herramienta oficial
+([ADR 0026](adr/0026-floci-como-plataforma-local.md)); ver [pruebas locales con Floci](pruebas-locales-floci.md).
+Mientras dure la suspensión de los despliegues reales, esa prueba es la garantía de la plataforma.
 
 ## Genesis y Apocalypse en AWS
 

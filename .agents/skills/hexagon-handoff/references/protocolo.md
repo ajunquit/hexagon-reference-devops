@@ -42,7 +42,8 @@ valores. Revisa incluso el resultado saneado del recolector antes de incorporarl
 
 ## Actualizar sin pisar otra sesión
 
-El destino de plataforma es el DevOps privado enlazado desde INICIO. En un producto, sigue el punto
+El destino de plataforma es el repositorio privado `hexagon-continuity`. Nunca escribas el relevo
+en una plantilla ni en un producto: su contenido se copia a otros repositorios, incluidos públicos. En un producto, sigue el punto
 de continuidad que definan sus instrucciones; conocimiento de negocio queda en business o Vision,
 y las decisiones técnicas en sus ADR. No migres reglas a la skill para sustituir sus fuentes.
 
@@ -53,7 +54,7 @@ que no se pidió publicar. No hagas stash, reset, limpieza, cambios de rama, for
 Un coordinador actualiza los archivos compartidos. Si otra sesión los está editando, entrega una
 ficha separada y coordina su incorporación; no uses la última escritura como resolución automática.
 Para fichas históricas usa una ruta nueva, por ejemplo
-`docs/continuidad/relevos/20261112t153000z-cierre-a1b2c3.md`; comprueba que no exista. Cada cierre
+`relevos/20261112t153000z-cierre-a1b2c3.md` de `hexagon-continuity`; comprueba que no exista. Cada cierre
 conserva la historia previa. Un reintento no duplica fichas o PR si ya hay uno que corresponde.
 
 Actualiza únicamente lo necesario:

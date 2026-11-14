@@ -91,8 +91,8 @@ function Get-AwsBackendHealth([hashtable] $Context, [hashtable] $Hosting) {
         if ($definition.exitCode -ne 0) { throw 'lifecycle.web.workloadUnavailable' }
         $containers = @(($definition.text | ConvertFrom-Json -AsHashtable -Depth 32).taskDefinition.containerDefinitions | Where-Object name -CEQ 'application')
         if ($containers.Count -ne 1 -or $containers[0].image -cne $workload.image) { throw 'lifecycle.web.workloadImageChanged' }
+        $balancers = @($service['loadBalancers'] ?? @())
         if ($workload.kind -ceq 'api') {
-            $balancers = @($service.loadBalancers)
             if ($balancers.Count -ne 1 -or $balancers[0].containerPort -ne 8080) { throw 'lifecycle.web.apiIngressChanged' }
             $targets = Invoke-AwsLifecycleCli $Context @('elbv2', 'describe-target-health', '--target-group-arn', [string] $balancers[0].targetGroupArn)
             if ($targets.exitCode -ne 0) { throw 'lifecycle.web.workloadUnavailable' }
@@ -100,7 +100,7 @@ function Get-AwsBackendHealth([hashtable] $Context, [hashtable] $Hosting) {
             $healthy = @($states | Where-Object { $_ -ceq 'healthy' }).Count
             if ($healthy -lt $workload.min_replicas) { throw 'lifecycle.web.targetsNotHealthy' }
         }
-        elseif (@($service.loadBalancers).Count -ne 0) { throw 'lifecycle.web.workerIngressExposed' }
+        elseif ($balancers.Count -ne 0) { throw 'lifecycle.web.workerIngressExposed' }
         $facts.Add(@{ workloadId = $id; service = [string] $service.serviceArn; taskDefinition = [string] $service.taskDefinition; image = $workload.image; runningTasks = [int] $service.runningCount })
     }
     Assert-AwsIdentityReady $Context $Hosting
