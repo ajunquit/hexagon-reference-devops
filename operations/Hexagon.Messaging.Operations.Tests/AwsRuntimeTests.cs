@@ -1,7 +1,7 @@
 using Amazon.Runtime;
 using Amazon.SQS;
 using Amazon.SQS.Model;
-using Testcontainers.LocalStack;
+using Testcontainers.Floci;
 using Xunit;
 
 namespace Hexagon.Messaging.Operations.Tests;
@@ -12,8 +12,7 @@ public sealed class AwsRuntimeTests
     [Trait("Category", "Broker")]
     public async Task ReplayPreservesEnvelopeHonorsLimitAndRetainsUnconfirmedMessages()
     {
-        await using var container = new LocalStackBuilder("localstack/localstack:4.9.2")
-            .WithEnvironment("SQS_ENDPOINT_STRATEGY", "off").Build();
+        await using var container = new FlociBuilder("floci/floci:2.3.0").Build();
         await container.StartAsync();
         using var client = new AmazonSQSClient(new BasicAWSCredentials("test", "test"), new AmazonSQSConfig
         {

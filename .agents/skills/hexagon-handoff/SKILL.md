@@ -10,8 +10,8 @@ Deja un relevo legible sin memoria del proveedor ni acceso al chat anterior. Apl
 
 1. Identifica objetivo, alcance y última instrucción del usuario. Lee AGENTS, las decisiones
    aplicables y el punto de continuidad indicado por el repositorio. Para la plataforma Hexagon,
-   ese punto es `docs/continuidad/INICIO.md` del DevOps privado; desde otro repo usa sus enlaces o
-   una copia accesible, sin cambiar la rama de otra sesión. No inventes actividad anterior si el
+   ese punto es `INICIO.md` del repositorio privado `hexagon-continuity`; clónalo o actualízalo
+   aparte, sin cambiar la rama de otra sesión. No inventes actividad anterior si el
    chat o la evidencia no están disponibles.
 2. Contrasta el cierre anterior con Git y GitHub de los repos afectados. El recolector opcional
    [collect_context.py](scripts/collect_context.py) recoge hechos sin leer diffs ni contenido de
@@ -19,7 +19,7 @@ Deja un relevo legible sin memoria del proveedor ni acceso al chat anterior. Apl
    `--repo`; usa `--output <archivo-nuevo-privado>` para guardar el resultado. Si no hay Python,
    GitHub CLI o acceso, usa herramientas equivalentes y marca qué no se pudo verificar.
 3. Actualiza el checkpoint y pendientes autorizados; agrega una ficha histórica con fecha en
-   `docs/continuidad/relevos/` del repositorio privado de continuidad. Enlázala desde el estado.
+   `relevos/` de `hexagon-continuity`. Enlázala desde el estado.
    Cambia INICIO, AGENTS, guías, ADR o Vision solo si hay una novedad aprobada que corresponda a
    su ámbito. Conserva decisiones, excepciones, pausas y trabajo ajeno. No copies el chat entero.
 4. Comprueba enlaces, ausencia de secretos, coherencia de estados y siguiente paso concreto.

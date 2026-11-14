@@ -250,7 +250,7 @@ function ConvertTo-AwsLocalMessaging {
         $policyDestination = Get-PolicyItem -Policy $Policy -Collection destinations -Id ([string] $destination.id)
         $topicName = if ($null -eq $policyDestination) { [string] $destination.id } else { [string] $policyDestination.topicName }
         $topicVariable = ([string] $destination.id).Replace('-', '_') + '_topic_arn'
-        $lines.Add("$topicVariable=`$(awslocal sns create-topic --name '$topicName' --query TopicArn --output text)")
+        $lines.Add("$topicVariable=`$(aws sns create-topic --name '$topicName' --query TopicArn --output text)")
 
         foreach ($workload in $destination.publisherWorkloads) {
             Add-LocalEnvironmentValue $workloads ([string] $workload) 'AWS_ACCESS_KEY_ID' 'test'
@@ -280,22 +280,22 @@ function ConvertTo-AwsLocalMessaging {
                 $dlqRetention = [int] $policyConsumer.redrive.deadLetterMessageRetentionSeconds
                 $maxReceiveCount = [int] $policyConsumer.redrive.maxReceiveCount
                 $lines.Add("${queueVariable}_dlq_attributes='{`"MessageRetentionPeriod`":`"$dlqRetention`"}'")
-                $lines.Add("${queueVariable}_dlq_url=`$(awslocal sqs create-queue --queue-name '$dlqName' --attributes `"`$${queueVariable}_dlq_attributes`" --query QueueUrl --output text)")
-                $lines.Add("${queueVariable}_dlq_arn=`$(awslocal sqs get-queue-attributes --queue-url `"`$${queueVariable}_dlq_url`" --attribute-names QueueArn --query Attributes.QueueArn --output text)")
+                $lines.Add("${queueVariable}_dlq_url=`$(aws sqs create-queue --queue-name '$dlqName' --attributes `"`$${queueVariable}_dlq_attributes`" --query QueueUrl --output text)")
+                $lines.Add("${queueVariable}_dlq_arn=`$(aws sqs get-queue-attributes --queue-url `"`$${queueVariable}_dlq_url`" --attribute-names QueueArn --query Attributes.QueueArn --output text)")
                 $lines.Add("${queueVariable}_redrive=`$(printf '{`"deadLetterTargetArn`":`"%s`",`"maxReceiveCount`":$maxReceiveCount}' `"`$${queueVariable}_dlq_arn`")")
                 $lines.Add("${queueVariable}_redrive_attributes=`$(python3 -c 'import json,sys; print(json.dumps(dict(RedrivePolicy=sys.argv[1])))' `"`$${queueVariable}_redrive`")")
-                $lines.Add("${queueVariable}_url=`$(awslocal sqs create-queue --queue-name '$queueName' --attributes `"`$${queueVariable}_attributes`" --query QueueUrl --output text)")
-                $lines.Add("awslocal sqs set-queue-attributes --queue-url `"`$${queueVariable}_url`" --attributes `"`$${queueVariable}_redrive_attributes`"")
+                $lines.Add("${queueVariable}_url=`$(aws sqs create-queue --queue-name '$queueName' --attributes `"`$${queueVariable}_attributes`" --query QueueUrl --output text)")
+                $lines.Add("aws sqs set-queue-attributes --queue-url `"`$${queueVariable}_url`" --attributes `"`$${queueVariable}_redrive_attributes`"")
             }
             else {
-                $lines.Add("${queueVariable}_url=`$(awslocal sqs create-queue --queue-name '$queueName' --attributes `"`$${queueVariable}_attributes`" --query QueueUrl --output text)")
+                $lines.Add("${queueVariable}_url=`$(aws sqs create-queue --queue-name '$queueName' --attributes `"`$${queueVariable}_attributes`" --query QueueUrl --output text)")
             }
-            $lines.Add("${queueVariable}_arn=`$(awslocal sqs get-queue-attributes --queue-url `"`$${queueVariable}_url`" --attribute-names QueueArn --query Attributes.QueueArn --output text)")
-            $lines.Add("${queueVariable}_subscription=`$(awslocal sns subscribe --topic-arn `"`$$topicVariable`" --protocol sqs --notification-endpoint `"`$${queueVariable}_arn`" --attributes RawMessageDelivery=true --query SubscriptionArn --output text)")
+            $lines.Add("${queueVariable}_arn=`$(aws sqs get-queue-attributes --queue-url `"`$${queueVariable}_url`" --attribute-names QueueArn --query Attributes.QueueArn --output text)")
+            $lines.Add("${queueVariable}_subscription=`$(aws sns subscribe --topic-arn `"`$$topicVariable`" --protocol sqs --notification-endpoint `"`$${queueVariable}_arn`" --attributes RawMessageDelivery=true --query SubscriptionArn --output text)")
             if ([string] $consumer.routing.mode -ceq 'include') {
                 $eventTypes = @($consumer.routing.eventTypes | ForEach-Object { '"' + [string] $_ + '"' }) -join ','
                 $filterPolicy = '{"EventType":[' + $eventTypes + ']}'
-                $lines.Add("awslocal sns set-subscription-attributes --subscription-arn `"`$${queueVariable}_subscription`" --attribute-name FilterPolicy --attribute-value '$filterPolicy'")
+                $lines.Add("aws sns set-subscription-attributes --subscription-arn `"`$${queueVariable}_subscription`" --attribute-name FilterPolicy --attribute-value '$filterPolicy'")
             }
             $lines.Add('')
 
@@ -312,24 +312,23 @@ function ConvertTo-AwsLocalMessaging {
 
     $compose = @'
 services:
-  localstack:
-    image: localstack/localstack:4.9.2
+  floci:
+    # Floci, the official local emulator (ADR 0026). The compat image brings the AWS CLI for the hook.
+    image: floci/floci:2.3.0-compat
     environment:
-      SERVICES: sns,sqs
       AWS_DEFAULT_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SQS_ENDPOINT_STRATEGY: path
     ports:
-      - "4566:4566"
+      - "127.0.0.1:4566:4566"
     volumes:
-      - ./localstack-init.sh:/etc/localstack/init/ready.d/init-aws.sh:ro
+      - ./floci-init.sh:/etc/floci/init/ready.d/init-aws.sh:ro
 '@
     return [pscustomobject] @{
         Workloads = $workloads
         Files     = [ordered] @{
             'compose.yaml'       = $compose.Replace('AWS_DEFAULT_REGION: us-east-1', "AWS_DEFAULT_REGION: $region")
-            'localstack-init.sh' = ($lines -join "`n")
+            'floci-init.sh'      = ($lines -join "`n")
         }
     }
 }

@@ -216,6 +216,38 @@ function Assert-AwsDeliveryTaskOrder([hashtable] $Journal, [hashtable] $Hosting,
 
 function Copy-AwsDeliveryInputs([hashtable] $Inputs) { return (ConvertTo-PlatformBootstrapJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40 }
 
+# The SNS topic and SQS queues each workload uses, as the messaging root exposes them, merged into a copy
+# of the hosting inputs. Only the exact AWS messaging keys and plain physical values are accepted.
+function Add-AwsMessagingBindings([hashtable] $Inputs, [object] $Bindings) {
+    $value = Copy-AwsDeliveryInputs $Inputs
+    if ($Bindings -isnot [Collections.IDictionary]) { throw 'lifecycle.delivery.messagingBindingsUnavailable' }
+    foreach ($id in $Bindings.Keys) {
+        if (-not $value.workloads.ContainsKey($id)) { throw 'lifecycle.delivery.bindingWorkloadUnknown' }
+        if (-not $value.workloads[$id].ContainsKey('environment') -or $null -eq $value.workloads[$id].environment) { $value.workloads[$id].environment = @{} }
+        foreach ($key in $Bindings[$id].Keys) {
+            $text = [string] $Bindings[$id][$key]
+            if ($key -cnotmatch '^Messaging__Aws__(Sns__Destinations__[a-z0-9-]+__(TopicArn|Region)|Sqs__Consumers__[a-z0-9-]+__(QueueUrl|Region|RetryVisibilityTimeoutSeconds))$' -or
+                $text -cnotmatch '^[A-Za-z0-9:._/-]+$' -or ($value.workloads[$id].ContainsKey('secret_references') -and $value.workloads[$id].secret_references.ContainsKey($key))) { throw 'lifecycle.delivery.bindingInvalid' }
+            if ($value.workloads[$id].environment.ContainsKey($key) -and $value.workloads[$id].environment[$key] -cne $text) { throw 'lifecycle.delivery.bindingConflict' }
+            $value.workloads[$id].environment[$key] = $text
+        }
+    }
+    return $value
+}
+
+function Get-AwsDeliveryBoundInputs([hashtable] $Context, [hashtable] $Inputs) {
+    $messaging = @($Context.inventory.roots | Where-Object id -CEQ 'messaging')
+    if ($Inputs.ContainsKey('messaging_enabled') -and $Inputs.messaging_enabled -eq $false) {
+        if ($messaging.Count -ne 0) { throw 'lifecycle.delivery.messagingUnexpected' }
+        return Copy-AwsDeliveryInputs $Inputs
+    }
+    if ($messaging.Count -ne 1 -or $messaging[0].status -cne 'Verified') { throw 'lifecycle.delivery.messagingNotReady' }
+    $state = Get-AwsLifecycleState $Context $messaging[0]
+    if ($state.stateStatus -cne 'Present' -or $state.lineage -cne $messaging[0].stateLineage -or $state.serial -ne $messaging[0].stateSerial -or
+        -not $state.outputs.ContainsKey('aws_sns_sqs')) { throw 'lifecycle.delivery.messagingBindingsUnavailable' }
+    return Add-AwsMessagingBindings $Inputs $state.outputs.aws_sns_sqs.value.workload_bindings
+}
+
 # The application may roll out only after every database task of ADR 0024 succeeded.
 function Assert-AwsDeliveryTasksComplete([hashtable] $Journal, [hashtable] $Hosting) {
     $required = @('database-credentials', 'migrations', 'database-access') + @(if (Test-AwsIntegratedKeycloak $Hosting.inputs) { 'keycloak-database' })
@@ -261,7 +293,8 @@ function Invoke-AwsApplicationStage {
             Assert-AwsDeliveryImages $journal $hosting
             Assert-AwsOciImages $Context $hosting.references $hosting.server
             if ($hosting.inputs.application_rollout_enabled -or $journal.activated -or $journal.jobs.Count -gt 0) { throw 'lifecycle.delivery.maintenanceAlreadyStarted' }
-            $inputs = Copy-AwsDeliveryInputs $hosting.inputs
+            # The workloads receive their SNS topic and SQS queues from the verified messaging root.
+            $inputs = Get-AwsDeliveryBoundInputs $Context $hosting.inputs
             $inputs.maintenance_jobs_enabled = $true; $inputs.application_rollout_enabled = $false
             $journal.maintenanceSha256 = Get-AwsDeliveryMaintenanceHash $Context $inputs
             Save-AwsDeliveryJournal $Context $journal -Confirm:$false
@@ -389,4 +422,4 @@ function Invoke-AwsApplicationStage {
     return @{ status = $(if ($Stage.StartsWith('Prepare', [StringComparison]::Ordinal)) { 'Prepared' } else { 'Completed' }); applicationVerified = $false; details = $details }
 }
 
-Export-ModuleMember -Function Read-AwsDeliveryJournal, Save-AwsDeliveryJournal, Assert-AwsDeliveryJournal, Get-AwsDeliveryHosting, Get-AwsDeliveryMaintenanceHash, Get-AwsDeliveryTaskSpec, Assert-AwsDeliveryTaskOrder, Assert-AwsDeliveryTasksComplete, Invoke-AwsApplicationStage
+Export-ModuleMember -Function Read-AwsDeliveryJournal, Save-AwsDeliveryJournal, Assert-AwsDeliveryJournal, Get-AwsDeliveryHosting, Get-AwsDeliveryMaintenanceHash, Get-AwsDeliveryTaskSpec, Assert-AwsDeliveryTaskOrder, Assert-AwsDeliveryTasksComplete, Add-AwsMessagingBindings, Get-AwsDeliveryBoundInputs, Invoke-AwsApplicationStage

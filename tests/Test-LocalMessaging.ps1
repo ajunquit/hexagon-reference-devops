@@ -53,12 +53,12 @@ try {
                     'Azure did not materialize the include routing filter.'
             }
             'aws-sns-sqs' {
-                $init = Get-Content -Raw -LiteralPath (Join-Path $output 'localstack-init.sh')
+                $init = Get-Content -Raw -LiteralPath (Join-Path $output 'floci-init.sh')
                 Assert-True ($init.Contains('"EventType"')) 'AWS filter must use the EventType message attribute.'
                 Assert-True (-not $init.Contains('"eventType"')) 'AWS filter used the wrong message attribute casing.'
                 if (-not $IsWindows) {
-                    $mode = [IO.File]::GetUnixFileMode((Join-Path $output 'localstack-init.sh'))
-                    Assert-True (($mode -band [IO.UnixFileMode]::UserExecute) -ne 0) 'The LocalStack initialization hook must be executable on Unix.'
+                    $mode = [IO.File]::GetUnixFileMode((Join-Path $output 'floci-init.sh'))
+                    Assert-True (($mode -band [IO.UnixFileMode]::UserExecute) -ne 0) 'The Floci initialization hook must be executable on Unix.'
                 }
             }
             'rabbitmq' {
@@ -122,7 +122,7 @@ try {
                     'Azure local topology did not preserve the explicit emulator TTL.'
             }
             'aws-sns-sqs' {
-                $init = Get-Content -Raw -LiteralPath (Join-Path $policyOutput 'localstack-init.sh')
+                $init = Get-Content -Raw -LiteralPath (Join-Path $policyOutput 'floci-init.sh')
                 Assert-True ($init.Contains('hexagon-example-dev-sales-worker-dlq')) `
                     'AWS local topology did not create the enabled DLQ.'
                 Assert-True (-not $init.Contains('hexagon-example-dev-worker-dlq')) `

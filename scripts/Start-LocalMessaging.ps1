@@ -87,20 +87,20 @@ try {
                         }
                     ).Count
                     $initScript = Get-Content -Raw -LiteralPath `
-                        (Join-Path $generated.OutputDirectory 'localstack-init.sh')
+                        (Join-Path $generated.OutputDirectory 'floci-init.sh')
                     $expectedQueues = @(
                         [regex]::Matches($initScript, "--queue-name '([^']+)'") |
                             ForEach-Object { $_.Groups[1].Value } |
                             Sort-Object -Unique
                     )
                     $actualTopics = & docker compose --project-name $projectName --file $generated.ComposeFile `
-                        exec -T localstack awslocal sns list-topics --output json 2>$null
+                        exec -T floci aws sns list-topics --output json 2>$null
                     if ($LASTEXITCODE -eq 0) {
                         $actualQueues = & docker compose --project-name $projectName --file $generated.ComposeFile `
-                            exec -T localstack awslocal sqs list-queues --output json 2>$null
+                            exec -T floci aws sqs list-queues --output json 2>$null
                         if ($LASTEXITCODE -eq 0) {
                             $actualSubscriptions = & docker compose --project-name $projectName --file $generated.ComposeFile `
-                                exec -T localstack awslocal sns list-subscriptions --output json 2>$null
+                                exec -T floci aws sns list-subscriptions --output json 2>$null
                             $topicText = ($actualTopics | ForEach-Object ToString) -join "`n"
                             $queueText = ($actualQueues | ForEach-Object ToString) -join "`n"
                             $subscriptionModel = (($actualSubscriptions | ForEach-Object ToString) -join "`n") |

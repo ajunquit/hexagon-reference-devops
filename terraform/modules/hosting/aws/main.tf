@@ -17,8 +17,10 @@ locals {
   protected_keys = ["ASPNETCORE_ENVIRONMENT", "HTTP_PORTS", "Auth__Authority", "Auth__Audience", "Auth__ApiScope", "AllowedOrigins", "ConnectionStrings__${var.database_connection_name}"]
   api_id         = one([for id, workload in var.workloads : id if workload.kind == "api"])
   database_host  = aws_db_instance.this.address
-  web_origin     = "https://${aws_cloudfront_distribution.web.domain_name}"
-  role_prefix    = replace(var.name_prefix, "-", "_")
+  # The port RDS reports (5432 on AWS); an emulator may publish the engine elsewhere.
+  database_port = aws_db_instance.this.port
+  web_origin    = "https://${aws_cloudfront_distribution.web.domain_name}"
+  role_prefix   = replace(var.name_prefix, "-", "_")
   # Images live in repositories of this environment: <registry>/<name_prefix>/<artifact>@sha256:...
   repositories = distinct([for image in concat([for workload in values(var.workloads) : workload.image], [var.bootstrap_image]) :
   split("@", trimprefix(image, "${local.registry}/"))[0]])
@@ -32,7 +34,7 @@ locals {
   # runs the migrations, and writes each connection string to its empty secret below; a secret that
   # already has a value keeps it (ADR 0024). Credentials never pass through Terraform plans or state.
   bootstrap = merge({
-    provider    = "aws", host = local.database_host, port = 5432, database = var.database_name,
+    provider    = "aws", host = local.database_host, port = local.database_port, database = var.database_name,
     maintenance = { role = "${local.role_prefix}_maintenance", secret = aws_secretsmanager_secret.maintenance_connection.arn }
     workloads = { for id, workload in var.workloads : id => {
       role = "${local.role_prefix}_${replace(id, "-", "_")}", secret = aws_secretsmanager_secret.workload_connection[id].arn, readDirectory = workload.kind == "api"

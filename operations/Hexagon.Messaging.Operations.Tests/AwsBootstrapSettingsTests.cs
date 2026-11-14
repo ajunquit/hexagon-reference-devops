@@ -52,6 +52,7 @@ public sealed class AwsBootstrapSettingsTests
     }
 
     [Theory]
+    [InlineData("host", "hexagon-floci-aws")]
     [InlineData("host", "example.postgres.database.azure.com")]
     [InlineData("database", "Product; DROP")]
     [InlineData("maintenance.role", "postgres")]
@@ -76,6 +77,19 @@ public sealed class AwsBootstrapSettingsTests
         var json = Json();
         json["maintenance"]!["password"] = "forbidden";
         Assert.Throws<JsonException>(() => AwsBootstrapSettings.Parse(json.ToJsonString()));
+    }
+
+    [Fact]
+    public void A_local_Rds_alias_preserves_the_reported_proxy_port_and_tls()
+    {
+        var json = Json();
+        json["host"] = "hexagon-floci-aws.rds.amazonaws.com";
+        json["port"] = 7001;
+        var settings = AwsBootstrapSettings.Parse(json.ToJsonString());
+        var connection = new Npgsql.NpgsqlConnectionStringBuilder(settings.ConnectionString(settings.Maintenance.Role, Credential.Generate()));
+        Assert.Equal("hexagon-floci-aws.rds.amazonaws.com", connection.Host);
+        Assert.Equal(7001, connection.Port);
+        Assert.Equal(Npgsql.SslMode.Require, connection.SslMode);
     }
 
     [Fact]

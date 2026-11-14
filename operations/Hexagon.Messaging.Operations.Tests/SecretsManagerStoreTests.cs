@@ -2,7 +2,7 @@ using Amazon.Runtime;
 using Amazon.SecretsManager;
 using Amazon.SecretsManager.Model;
 using Hexagon.Database.Bootstrap;
-using Testcontainers.LocalStack;
+using Testcontainers.Floci;
 using Xunit;
 
 namespace Hexagon.Messaging.Operations.Tests;
@@ -13,7 +13,7 @@ public sealed class SecretsManagerStoreTests
     [Trait("Category", "Database")]
     public async Task An_empty_secret_reads_as_null_until_the_task_writes_it()
     {
-        await using var container = new LocalStackBuilder("localstack/localstack:4.9.2").Build();
+        await using var container = new FlociBuilder("floci/floci:2.3.0").Build();
         await container.StartAsync();
         using var client = new AmazonSecretsManagerClient(new BasicAWSCredentials("test", "test"), new AmazonSecretsManagerConfig
         {

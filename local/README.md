@@ -72,7 +72,7 @@ borra políticas versionadas, el manifiesto backend ni datos de otros proyectos.
 | Proveedor | Entorno local | Puertos predeterminados |
 | --- | --- | --- |
 | Azure Service Bus | Emulador oficial y SQL Server | AMQP `5672`, salud `5300` |
-| AWS SNS/SQS | LocalStack | gateway `4566` |
+| AWS SNS/SQS | Floci (ADR 0026) | gateway `4566` |
 | RabbitMQ | RabbitMQ | AMQP `5672` |
 
 Las fixtures de pruebas integrales del backend siguen creando recursos desechables propios. Esa

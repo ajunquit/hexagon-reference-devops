@@ -126,6 +126,15 @@ try {
     $facts = Get-AwsBackendHealth $context $hosting
     Assert-True ($facts.Count -eq 2 -and $facts[0].workloadId -ceq 'api' -and $facts[0].image -ceq $images.api -and $facts[1].runningTasks -eq 1) 'Backend health facts.'
     Assert-True (@($script:calls | Where-Object { $_.line -like "ecs describe-services*$prefix-auth*" }).Count -eq 1) 'Integrated identity must be checked with the backend.'
+    $script:services["$prefix-worker"].Remove('loadBalancers')
+    Assert-True ((Get-AwsBackendHealth $context $hosting).Count -eq 2) 'A worker may omit optional load balancers.'
+    $script:services["$prefix-worker"].loadBalancers = $null
+    Assert-True ((Get-AwsBackendHealth $context $hosting).Count -eq 2) 'Null worker load balancers mean no ingress.'
+    $script:services["$prefix-worker"].loadBalancers = @()
+    $apiBalancers = $script:services["$prefix-api"].loadBalancers
+    $script:services["$prefix-api"].Remove('loadBalancers')
+    Assert-Rejected { Get-AwsBackendHealth $context $hosting } 'lifecycle.web.apiIngressChanged'
+    $script:services["$prefix-api"].loadBalancers = $apiBalancers
     $script:services["$prefix-api"].deployments = @(@{ rolloutState = 'IN_PROGRESS' }, @{ rolloutState = 'COMPLETED' })
     Assert-Rejected { Get-AwsBackendHealth $context $hosting } 'lifecycle.web.workloadNotReady'
     $script:services["$prefix-api"].deployments = @(@{ rolloutState = 'COMPLETED' }); $script:services["$prefix-api"].runningCount = 0

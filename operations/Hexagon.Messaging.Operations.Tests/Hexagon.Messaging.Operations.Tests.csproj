@@ -12,7 +12,7 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
     <PackageReference Include="Testcontainers.ServiceBus" />
-    <PackageReference Include="Testcontainers.LocalStack" />
+    <PackageReference Include="Testcontainers.Floci" />
     <PackageReference Include="Testcontainers.RabbitMq" />
     <ProjectReference Include="../Hexagon.Messaging.Operations/Hexagon.Messaging.Operations.csproj" />
     <ProjectReference Include="../Hexagon.Database.Bootstrap/Hexagon.Database.Bootstrap.csproj" />

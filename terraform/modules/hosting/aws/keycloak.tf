@@ -81,7 +81,7 @@ resource "aws_ecs_task_definition" "keycloak" {
     portMappings = [{ containerPort = 8080, protocol = "tcp" }, { containerPort = 9000, protocol = "tcp" }]
     environment = [for name, value in {
       KC_DB                       = "postgres"
-      KC_DB_URL                   = "jdbc:postgresql://${local.database_host}:5432/${var.database_name}?sslmode=require"
+      KC_DB_URL                   = "jdbc:postgresql://${local.database_host}:${local.database_port}/${var.database_name}?sslmode=require"
       KC_DB_SCHEMA                = "keycloak"
       KC_DB_USERNAME              = local.keycloak_role
       KC_DB_POOL_INITIAL_SIZE     = "1"

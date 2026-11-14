@@ -6,8 +6,8 @@ Cada fase termina con pruebas y documentación antes de iniciar la siguiente.
 La [fábrica de productos](https://github.com/ajunquit/hexagon-template-ng/blob/main/docs/fabrica-de-productos.md)
 es una ruta complementaria para generar cuatro repositorios, incluido business. El coordinador
 `hexagon-product-factory` está implementado, verificado e integrado; no cambia
-contratos de ambiente ni autoriza despliegues. El checkpoint de continuidad, que vive en el
-repositorio privado de la plataforma, registra evidencia y PR vigentes. La validación cloud de 9C permanece en pausa.
+contratos de ambiente ni autoriza despliegues. El [checkpoint de continuidad](https://github.com/ajunquit/hexagon-continuity/blob/main/estado.md)
+registra evidencia y PR vigentes. La validación cloud de 9C permanece en pausa.
 
 ## Estado
 
