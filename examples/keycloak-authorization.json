@@ -1,0 +1,10 @@
+{
+  "apiVersion": "hexagon.ec/keycloak-authorization/v1",
+  "kind": "KeycloakAuthorization",
+  "product": "hexagon-example",
+  "environment": "dev",
+  "authority": "https://identity.example.invalid/realms/hexagon-example",
+  "resourceServer": { "id": "00000000-0000-4000-8000-000000000001", "clientId": "hexagon-example-api", "apiScope": "hexagon_example_api.all" },
+  "frontend": { "clientId": "hexagon-example-web", "origins": ["https://web.example.invalid"] },
+  "authorizationClientId": "hexagon-example-dev-authorization"
+}

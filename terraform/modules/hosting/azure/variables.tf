@@ -53,6 +53,21 @@ variable "auth" {
   }
 }
 variable "workloads" {
+  validation {
+    condition = alltrue([for workload in values(var.workloads) :
+      length([for name in concat(keys(workload.environment), keys(workload.secret_references)) : name if startswith(lower(name), "auth__authorization__")]) == 0 ? true : (
+        workload.kind == "api" &&
+        length([for name in keys(workload.environment) : name if startswith(lower(name), "auth__authorization__")]) == 3 &&
+        length([for name in keys(workload.secret_references) : name if startswith(lower(name), "auth__authorization__")]) == 1 &&
+        try(workload.environment["Auth__Authorization__Product"] == var.product, false) &&
+        can(regex("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", try(workload.environment["Auth__Authorization__ResourceServerId"], ""))) &&
+        try(workload.environment["Auth__Authorization__ResourceServerId"], "") != "00000000-0000-0000-0000-000000000000" &&
+        can(regex("^[a-z][a-z0-9._-]{2,100}$", try(workload.environment["Auth__Authorization__ClientId"], ""))) &&
+        contains(keys(workload.secret_references), "Auth__Authorization__ClientSecret")
+      )
+    ])
+    error_message = "Authorization requires exactly three public API settings and its secret reference, matching the product and resource UUID; consumers cannot receive IAM credentials."
+  }
   type = map(object({
     name        = string, kind = string, image = string,
     http_ports  = list(number), health_port = number,

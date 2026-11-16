@@ -1,4 +1,5 @@
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'AuthorizationDelivery.psm1')
 $ErrorActionPreference = 'Stop'
 foreach ($name in @('PlatformBootstrap', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'AwsEnvironmentStore', 'TerraformAwsLifecycle', 'AwsLifecycleInputs', 'ApplicationArtifacts', 'AwsOciDelivery', 'AwsMaintenanceDelivery', 'AwsWebDelivery', 'StaticWebPublication', 'AzureAcceptance', 'AcceptanceCleanup', 'AcceptanceRun', 'AwsAcceptance')) {
     Import-Module (Join-Path $PSScriptRoot "$name.psm1")
@@ -11,7 +12,8 @@ foreach ($name in @('PlatformBootstrap', 'EnvironmentLifecycle', 'EnvironmentSna
 # custody of the instance.
 
 $script:taskCommands = @{ 'database-credentials' = @('--prepare-credentials'); migrations = @('--migrate-only'); 'database-access' = @(); 'keycloak-database' = @('--prepare-keycloak'); 'acceptance-seed' = @('--seed-acceptance-only') }
-$script:applicationTasks = @('migrations', 'acceptance-seed')
+$script:applicationTasks = @('migrations', 'acceptance-seed', 'authorization', 'acceptance-authorization')
+foreach ($id in @('authorization', 'acceptance-authorization')) { $script:taskCommands[$id] = @('--migrate-only', '--reconcile-auth-authorization', '--provision-auth-authorization') }
 
 function Assert-AwsDeliveryJournal([hashtable] $Context, [hashtable] $Journal, [string] $DeliverySha256) {
     $json = ConvertTo-Json -InputObject $Journal -Depth 24
@@ -138,7 +140,7 @@ function Get-AwsDeliveryTaskSpec([hashtable] $Context, [hashtable] $Hosting, [st
         $embedded = @($containers[0].environment | Where-Object name -CEQ 'HEXAGON_ACCEPTANCE_SEED')
         if ($embedded.Count -ne 1 -or (Get-SnapshotHash ($embedded[0].value | ConvertFrom-Json -AsHashtable)) -cne (Get-SnapshotHash $fixture)) { throw 'lifecycle.acceptance.fixtureChanged' }
     }
-    elseif ($TaskId -cne 'migrations') {
+    elseif ($TaskId -cnotin @('migrations', 'authorization', 'acceptance-authorization')) {
         $bootstrap = @{} + $outputs.database_bootstrap
         if ($TaskId -ceq 'keycloak-database') {
             if (-not (Test-AwsIntegratedKeycloak $inputs)) { throw 'lifecycle.identity.notIntegrated' }
@@ -147,6 +149,27 @@ function Get-AwsDeliveryTaskSpec([hashtable] $Context, [hashtable] $Hosting, [st
         }
         $embedded = @($containers[0].environment | Where-Object name -CEQ 'HEXAGON_DATABASE_BOOTSTRAP')
         if ($embedded.Count -ne 1 -or (Get-SnapshotHash ($embedded[0].value | ConvertFrom-Json -AsHashtable -Depth 20)) -cne (Get-SnapshotHash $bootstrap)) { throw 'lifecycle.delivery.databaseBindingsChanged' }
+    }
+    if ($TaskId -cin @('authorization', 'acceptance-authorization')) {
+        $auth = Get-HostingAuthorizationBindings $inputs
+        if ($null -eq $auth) { throw 'auth.delivery.notConfigured' }
+        $environment = @{ ASPNETCORE_ENVIRONMENT = 'Production'; Auth__Authority = $outputs.frontend_authentication.authority
+            Auth__Audience = $inputs.auth.audience; Auth__ApiScope = $inputs.auth.api_scope }
+        foreach ($key in $auth.environment.Keys) { $environment[$key] = $auth.environment[$key] }
+        $actualEnvironment = @{}
+        foreach ($item in $containers[0].environment) {
+            if ($actualEnvironment.ContainsKey($item.name)) { throw 'auth.delivery.environmentChanged' }
+            $actualEnvironment[$item.name] = $item.value
+        }
+        $secrets = @{ "ConnectionStrings__$($inputs.database_connection_name)" = $outputs.database_bootstrap.maintenance.secret
+            Auth__Authorization__ClientSecret = $auth.secret.secret_arn }
+        $actualSecrets = @{}
+        foreach ($item in $containers[0].secrets) {
+            if ($actualSecrets.ContainsKey($item.name)) { throw 'auth.delivery.secretReferenceChanged' }
+            $actualSecrets[$item.name] = $item.valueFrom
+        }
+        if ((Get-SnapshotHash $environment) -cne (Get-SnapshotHash $actualEnvironment)) { throw 'auth.delivery.environmentChanged' }
+        if ((Get-SnapshotHash $secrets) -cne (Get-SnapshotHash $actualSecrets)) { throw 'auth.delivery.secretReferenceChanged' }
     }
     return $expected
 }
@@ -208,6 +231,10 @@ function Assert-AwsDeliveryTaskOrder([hashtable] $Journal, [hashtable] $Hosting,
         'keycloak-database' { @('database-credentials') }
         'acceptance-seed' { @('database-credentials', 'migrations', 'database-access') + @(if (Test-AwsIntegratedKeycloak $Hosting.inputs) { 'keycloak-database' }) }
     }
+    if ($TaskId -cin @('authorization', 'acceptance-authorization')) {
+        Assert-AuthorizationTaskOrder $Journal $Hosting.inputs
+        if ($TaskId -ceq 'acceptance-authorization' -and (-not $Journal.jobs.ContainsKey('acceptance-seed') -or $Journal.jobs['acceptance-seed'].status -cne 'Succeeded')) { throw 'auth.delivery.previousTaskRequired' }
+    }
     if ($TaskId -ceq 'keycloak-database' -and -not (Test-AwsIntegratedKeycloak $Hosting.inputs)) { throw 'lifecycle.identity.notIntegrated' }
     foreach ($id in $required) {
         if (-not $Journal.jobs.ContainsKey($id) -or $Journal.jobs[$id].status -cne 'Succeeded') { throw 'lifecycle.delivery.previousTaskRequired' }
@@ -251,6 +278,7 @@ function Get-AwsDeliveryBoundInputs([hashtable] $Context, [hashtable] $Inputs) {
 # The application may roll out only after every database task of ADR 0024 succeeded.
 function Assert-AwsDeliveryTasksComplete([hashtable] $Journal, [hashtable] $Hosting) {
     $required = @('database-credentials', 'migrations', 'database-access') + @(if (Test-AwsIntegratedKeycloak $Hosting.inputs) { 'keycloak-database' })
+    Assert-AuthorizationReady $Journal $Hosting.inputs
     foreach ($id in $required) {
         if (-not $Journal.jobs.ContainsKey($id) -or $Journal.jobs[$id].status -cne 'Succeeded') { throw 'lifecycle.delivery.previousTaskRequired' }
     }
@@ -259,7 +287,7 @@ function Assert-AwsDeliveryTasksComplete([hashtable] $Journal, [hashtable] $Host
 function Invoke-AwsApplicationStage {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([hashtable] $Context, [hashtable] $Delivery, [hashtable] $Release, [string] $DeliverySha256,
-        [ValidateSet('Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'DatabaseCredentials', 'Migrations', 'DatabaseAccess', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity',
+        [ValidateSet('Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'DatabaseCredentials', 'Migrations', 'DatabaseAccess', 'Authorization', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity',
             'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
         [string] $Repository, [string] $TrustedCommit, [string] $Workspace, [string] $ReviewSha256, [string] $Confirmation)
     if (-not $PSCmdlet.ShouldProcess($Context.prefix, "Run application delivery stage $Stage")) { return @{ status = 'Unverified'; applicationVerified = $false; details = @{} } }
@@ -305,14 +333,15 @@ function Invoke-AwsApplicationStage {
             Assert-AwsDeliveryImages $journal $hosting
             if ($hosting.inputs.maintenance_jobs_enabled -ne $true -or $journal.maintenanceSha256 -cne (Get-AwsDeliveryMaintenanceHash $Context $hosting.inputs)) { throw 'lifecycle.delivery.maintenanceEvidenceStale' }
             Assert-AwsOciImages $Context $hosting.references $hosting.server
-            if ($Stage -cin @('ApplyMaintenance', 'DatabaseCredentials', 'Migrations', 'DatabaseAccess', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity') -and
+            if ($Stage -cin @('ApplyMaintenance', 'DatabaseCredentials', 'Migrations', 'DatabaseAccess', 'Authorization', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity') -and
                 $hosting.inputs.application_rollout_enabled) { throw 'lifecycle.delivery.activationOrderInvalid' }
             switch ($Stage) {
                 'ApplyMaintenance' { Invoke-AwsDeliveryPlan $Context $journal Maintenance $ReviewSha256 $Confirmation $Workspace }
-                { $_ -cin @('DatabaseCredentials', 'Migrations', 'DatabaseAccess', 'KeycloakDatabase') } {
+                { $_ -cin @('DatabaseCredentials', 'Migrations', 'DatabaseAccess', 'Authorization', 'KeycloakDatabase') } {
                     if ($Stage -ceq 'KeycloakDatabase' -and $hosting.inputs.keycloak_rollout_enabled) { throw 'lifecycle.identity.alreadyStarted' }
-                    $task = @{ DatabaseCredentials = 'database-credentials'; Migrations = 'migrations'; DatabaseAccess = 'database-access'; KeycloakDatabase = 'keycloak-database' }[$Stage]
+                    $task = @{ DatabaseCredentials = 'database-credentials'; Migrations = 'migrations'; DatabaseAccess = 'database-access'; Authorization = 'authorization'; KeycloakDatabase = 'keycloak-database' }[$Stage]
                     Assert-AwsDeliveryTaskOrder $journal $hosting $task
+                    if ($Stage -ceq 'Authorization') { Assert-AwsIdentityReady $Context $hosting }
                     $record = Invoke-AwsDeliveryTask $Context $journal $hosting $task
                     $details.executionId = $record.executionId
                 }
@@ -406,7 +435,13 @@ function Invoke-AwsApplicationStage {
                             tenant = $fixture.tenant; otherTenant = $fixture.otherTenant; origin = $target.origin; apiUrl = $hosting.outputs.api_url
                             authentication = $hosting.outputs.frontend_authentication; backend = $contracts.backend; web = $contracts.web }
                         $order = (Get-Command Assert-AwsDeliveryTaskOrder).ScriptBlock; $runTask = (Get-Command Invoke-AwsDeliveryTask).ScriptBlock
-                        $seed = { & $order $journal $hosting acceptance-seed; & $runTask $Context $journal $hosting acceptance-seed | Out-Null }.GetNewClosure()
+                        $hasAuthorization = $null -ne (Get-HostingAuthorizationBindings $hosting.inputs)
+                        $seed = {
+                            & $order $journal $hosting acceptance-seed; & $runTask $Context $journal $hosting acceptance-seed | Out-Null
+                            if ($hasAuthorization) {
+                                & $order $journal $hosting acceptance-authorization; & $runTask $Context $journal $hosting acceptance-authorization | Out-Null
+                            }
+                        }.GetNewClosure()
                         $save = (Get-Command Save-AwsDeliveryJournal).ScriptBlock
                         $persist = { & $save $Context $journal -Confirm:$false }.GetNewClosure()
                         $browserCommand = Get-Command Invoke-AwsBrowserAcceptance; $cleanupCommand = Get-Command Invoke-AwsAcceptanceCleanup; $evidenceCommand = Get-Command Save-AwsAcceptanceEvidence

@@ -141,6 +141,21 @@ if (Test-AwsPolicy $awsInvalid) { throw 'AWS credentials must be Secrets Manager
 $awsInvalid = ($awsPolicy | ConvertTo-Json -Depth 40) | ConvertFrom-Json -AsHashtable
 $awsInvalid.infrastructure.availability_zones = @('us-east-1a')
 if (Test-AwsPolicy $awsInvalid) { throw 'The AWS reference requires two availability zones.' }
+$umaBackend = ($backend | ConvertTo-Json -Depth 40) | ConvertFrom-Json -AsHashtable
+$umaBackend.identity.authorization = 'keycloak-uma'
+Assert-Rejected { ConvertTo-AwsHostingInput $descriptor $release $awsPolicy $umaBackend $frontend } 'auth.delivery.requirementNotBound'
+Assert-Rejected { ConvertTo-AzureHostingInput $descriptor $release $policy $umaBackend $frontend } 'auth.delivery.requirementNotBound'
+$umaBackend.identity.authorization = 'unknown'
+Assert-Rejected { ConvertTo-AwsHostingInput $descriptor $release $awsPolicy $umaBackend $frontend } 'auth.delivery.requirementUnsupported'
+$umaBackend.identity.authorization = 'keycloak-uma'
+$umaPolicy = ($awsPolicy | ConvertTo-Json -Depth 40) | ConvertFrom-Json -AsHashtable
+$umaPolicy.workloads['hexagon-example-api'].environment.Auth__Authorization__Product = 'hexagon-example'
+$umaPolicy.workloads['hexagon-example-api'].environment.Auth__Authorization__ResourceServerId = '00000000-0000-0000-0000-000000000002'
+$umaPolicy.workloads['hexagon-example-api'].environment.Auth__Authorization__ClientId = 'hexagon-example-dev-authorization'
+$umaPolicy.workloads['hexagon-example-api'].secret_references.Auth__Authorization__ClientSecret = @{ secret_arn = 'arn:aws:secretsmanager:us-east-1:123456789012:secret:example-authorization-AbCdEf' }
+$umaInput = ConvertTo-AwsHostingInput $descriptor $release $umaPolicy $umaBackend $frontend
+if ($umaInput.workloads['hexagon-example-api'].environment.Auth__Authorization__Product -cne 'hexagon-example') { throw 'The declared UMA requirement lost its validated bindings.' }
+Write-Host 'Declared UMA requirements require explicit provider bindings.'
 $release.artifacts.backend['hexagon-example-api'] = 'exampledev0001.azurecr.io/hexagon-example-api:latest'
 Assert-Rejected { ConvertTo-AwsHostingInput $descriptor $release $awsPolicy $backend $frontend } 'pinned by digest'
 & (Join-Path $root 'scripts/Export-AwsHostingInputs.ps1') -Descriptor 'unused' -Release 'unused' -Policy 'unused' -Output (Join-Path ([IO.Path]::GetTempPath()) 'unused.auto.tfvars.json') -WhatIf

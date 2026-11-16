@@ -1,4 +1,5 @@
 Import-Module (Join-Path $PSScriptRoot 'AzureKeycloakDelivery.psm1')
+Import-Module (Join-Path $PSScriptRoot 'AuthorizationDelivery.psm1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 foreach ($name in @('PlatformBootstrap', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'AzureEnvironmentStore', 'TerraformAzureLifecycle', 'AzureLifecycleInputs', 'ApplicationArtifacts', 'AzureOciDelivery', 'AzureMaintenanceDelivery', 'AzureWebDelivery', 'StaticWebPublication', 'AzureAcceptance', 'AcceptanceCleanup', 'AcceptanceRun')) {
@@ -137,6 +138,7 @@ function Assert-AzureDeliveryMaintenance([hashtable] $Context, [hashtable] $Jour
     if ($RequireJobs) {
         $requiredJobs = @('migrations', 'database-access')
         if (Test-IntegratedKeycloak $Hosting.inputs) { $requiredJobs += 'keycloak-database' }
+        Assert-AuthorizationReady $Journal $Hosting.inputs
         foreach ($id in $requiredJobs) {
             if (-not $Journal.jobs.ContainsKey($id) -or $Journal.jobs[$id].status -cne 'Succeeded') { throw 'lifecycle.delivery.successfulJobsRequired' }
         }
@@ -157,11 +159,21 @@ function Get-AzureDeliveryJobSpec([hashtable] $Context, [hashtable] $Hosting, [s
         @($Hosting.state.resources | Where-Object { $_.type -ceq 'azurerm_user_assigned_identity' -and $_.id -ieq $identities[0] }).Count -ne 1) { throw 'lifecycle.delivery.maintenanceIdentityInvalid' }
     $identity = Invoke-AzureLifecycleHttp $Context GET "https://management.azure.com$($identities[0])?api-version=2023-01-31"
     if ($identity.status -ne 200 -or ([Text.Encoding]::UTF8.GetString($identity.bytes) | ConvertFrom-Json).properties.clientId -ine $outputs.database_bootstrap.clientId) { throw 'lifecycle.delivery.maintenanceIdentityInvalid' }
-    $environment = $(if ($Job -cin @('migrations', 'acceptance-seed')) {
+    $environment = $(if ($Job -cin @('migrations', 'acceptance-seed', 'authorization', 'acceptance-authorization')) {
         @{ ASPNETCORE_ENVIRONMENT = 'Production'; AZURE_CLIENT_ID = $outputs.database_bootstrap.clientId
             "ConnectionStrings__$($inputs.database_connection_name)" = "Host=$($outputs.database_bootstrap.host);Database=$($outputs.database_bootstrap.database);Username=$($outputs.database_bootstrap.administrator);SSL Mode=VerifyFull"
             Auth__Authority = (Get-AzureHostingAuthority $inputs $outputs); Auth__Audience = $inputs.auth.audience; Auth__ApiScope = $inputs.auth.api_scope }
     } else { @{ HEXAGON_DATABASE_BOOTSTRAP = ConvertTo-Json -InputObject $outputs.database_bootstrap -Depth 20 -Compress } })
+    if ($Job -cin @('authorization', 'acceptance-authorization')) {
+        $auth = Get-HostingAuthorizationBindings $inputs
+        if ($null -eq $auth) { throw 'auth.delivery.notConfigured' }
+        foreach ($key in $auth.environment.Keys) { $environment[$key] = $auth.environment[$key] }
+        $environment.Auth__Authorization__ClientSecret = @{ secretRef = 'authorization-client' }
+        $secrets = @($actual.properties.configuration.secrets)
+        if ($secrets.Count -ne 1 -or $secrets[0].name -cne 'authorization-client' -or
+            $secrets[0].keyVaultUrl -cne $auth.secret.secret_uri -or $secrets[0].identity -ine $identities[0] -or
+            ($secrets[0].ContainsKey('value') -and $secrets[0].value)) { throw 'auth.delivery.secretReferenceChanged' }
+    }
     if ($Job -ceq 'acceptance-seed') {
         $fixture = Get-AcceptanceFixture $Context.inventory $inputs
         $embedded = @($actual.properties.template.containers[0].env | Where-Object name -CEQ 'HEXAGON_ACCEPTANCE_SEED')
@@ -188,8 +200,8 @@ function Get-AzureDeliveryJobSpec([hashtable] $Context, [hashtable] $Hosting, [s
             $secrets[0].keyVaultUrl -cne $inputs.keycloak.database_password.secret_uri -or $secrets[0].identity -ine $identities[0] -or
             ($secrets[0].ContainsKey('value') -and $secrets[0].value)) { throw 'lifecycle.identity.secretReferenceChanged' }
     }
-    $expected = @{ name = 'maintenance'; image = $(if ($Job -cin @('migrations', 'acceptance-seed')) { $inputs.workloads[$inputs.migration_workload].image } else { $inputs.bootstrap_image })
-        args = @($(if ($Job -ceq 'migrations') { @('--migrate-only') } elseif ($Job -ceq 'acceptance-seed') { @('--seed-acceptance-only') } elseif ($Job -ceq 'keycloak-database') { @('--prepare-keycloak') } else { @() })); environment = $environment; cpu = 0.5; memory = '1Gi' }
+    $expected = @{ name = 'maintenance'; image = $(if ($Job -cin @('migrations', 'acceptance-seed', 'authorization', 'acceptance-authorization')) { $inputs.workloads[$inputs.migration_workload].image } else { $inputs.bootstrap_image })
+        args = @($(if ($Job -ceq 'migrations') { @('--migrate-only') } elseif ($Job -ceq 'acceptance-seed') { @('--seed-acceptance-only') } elseif ($Job -ceq 'keycloak-database') { @('--prepare-keycloak') } elseif ($Job -cin @('authorization', 'acceptance-authorization')) { @('--migrate-only', '--reconcile-auth-authorization', '--provision-auth-authorization') } else { @() })); environment = $environment; cpu = 0.5; memory = '1Gi' }
     return @{ id = $jobId; expected = $expected }
 }
 
@@ -244,7 +256,7 @@ function Invoke-AzureDeliveryPlan([hashtable] $Context, [hashtable] $Journal, [s
 function Invoke-AzureApplicationStage {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([hashtable] $Context, [hashtable] $Delivery, [hashtable] $Release, [string] $DeliverySha256,
-        [ValidateSet('Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity', 'Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
+        [ValidateSet('Artifacts', 'PrepareMaintenance', 'ApplyMaintenance', 'KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity', 'Migrations', 'DatabaseAccess', 'Authorization', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')][string] $Stage,
         [string] $Repository, [string] $TrustedCommit, [string] $Workspace, [string] $ReviewSha256, [string] $Confirmation)
     if (-not $PSCmdlet.ShouldProcess($Context.prefix, "Run application delivery stage $Stage")) { return @{ status = 'Unverified'; applicationVerified = $false; details = @{} } }
     Assert-AzureLifecycleRuntime $Context
@@ -285,9 +297,9 @@ function Invoke-AzureApplicationStage {
     else {
         Assert-AzureDeliveryMaintenance $Context $journal $hosting -RequireJobs:($Stage -cin @('PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance'))
         Assert-AzureOciImages $Context $hosting.references $hosting.registry.login_server
-        if ($Stage -cin @('Migrations', 'DatabaseAccess', 'ApplyMaintenance') -and $hosting.inputs.application_rollout_enabled) { throw 'lifecycle.delivery.activationOrderInvalid' }
+        if ($Stage -cin @('Migrations', 'DatabaseAccess', 'Authorization', 'ApplyMaintenance') -and $hosting.inputs.application_rollout_enabled) { throw 'lifecycle.delivery.activationOrderInvalid' }
         if ($Stage -cin @('KeycloakDatabase', 'PrepareIdentity', 'ApplyIdentity') -and -not (Test-IntegratedKeycloak $hosting.inputs)) { throw 'lifecycle.identity.notIntegrated' }
-        if ($Stage -cin @('Migrations', 'DatabaseAccess', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')) {
+        if ($Stage -cin @('Migrations', 'DatabaseAccess', 'Authorization', 'PrepareActivation', 'ApplyActivation', 'PublishWeb', 'VerifyServing', 'PrepareAcceptance', 'Acceptance')) {
             if ((Test-IntegratedKeycloak $hosting.inputs) -and (-not $journal.jobs.ContainsKey('keycloak-database') -or $journal.jobs['keycloak-database'].status -cne 'Succeeded')) { throw 'lifecycle.identity.databasePreparationRequired' }
             Assert-AzureIntegratedIdentityReady $Context $hosting
         }
@@ -309,6 +321,10 @@ function Invoke-AzureApplicationStage {
                     if (-not $hosting.inputs.keycloak_rollout_enabled) { throw 'lifecycle.identity.rolloutInputsRequired' }
                     Invoke-AzureDeliveryPlan $Context $journal Identity $ReviewSha256 $Confirmation $Workspace
                 }
+            }
+            'Authorization' {
+                Assert-AuthorizationTaskOrder $journal $hosting.inputs
+                Invoke-AzureDeliveryJob $Context $journal $hosting authorization | Out-Null
             }
             'Migrations' { Invoke-AzureDeliveryJob $Context $journal $hosting migrations | Out-Null }
             'DatabaseAccess' {
@@ -356,7 +372,13 @@ function Invoke-AzureApplicationStage {
                         tenant = $fixture.tenant; otherTenant = $fixture.otherTenant; origin = $target.origin; apiUrl = $hosting.state.outputs.api_url
                         authentication = $hosting.state.outputs.frontend_authentication; backend = $contracts.backend; web = $contracts.web }
                     $invokeJob = (Get-Command Invoke-AzureDeliveryJob).ScriptBlock
-                    $seed = { & $invokeJob $Context $journal $hosting acceptance-seed | Out-Null }.GetNewClosure()
+                    $hasAuthorization = $null -ne (Get-HostingAuthorizationBindings $hosting.inputs)
+                    $seed = {
+                        & $invokeJob $Context $journal $hosting acceptance-seed | Out-Null
+                        if ($hasAuthorization) {
+                            & $invokeJob $Context $journal $hosting acceptance-authorization | Out-Null
+                        }
+                    }.GetNewClosure()
                     $save = (Get-Command Save-AzureDeliveryJournal).ScriptBlock
                     $persist = { & $save $Context $journal -Confirm:$false }.GetNewClosure()
                     $details = Invoke-AcceptanceRun $Context $journal $consent $ReviewSha256 $configuration $Workspace $seed $persist -Confirm:$false

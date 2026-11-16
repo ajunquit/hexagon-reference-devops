@@ -102,6 +102,14 @@ $requiredPaths = @(
     'contracts/schemas/application-delivery-result-v1.schema.json',
     'tests/Test-ApplicationDelivery.ps1',
     'tests/Test-KeycloakDelivery.ps1',
+    'tests/Test-KeycloakAuthorization.ps1',
+    'tests/Invoke-KeycloakAuthorizationAcceptance.ps1',
+    'tests/Invoke-AuthLocalIntegration.ps1',
+    'examples/keycloak-authorization.json',
+    'scripts/KeycloakAuthorization.psm1',
+    'scripts/AuthorizationDelivery.psm1',
+    'scripts/Invoke-KeycloakAuthorization.ps1',
+    'contracts/schemas/keycloak-authorization-v1.schema.json',
     'scripts/AzureKeycloakDelivery.psm1',
     '.github/workflows/delivery.yml',
     'docs/entrega-aplicaciones-azure.md',
@@ -324,6 +332,7 @@ if ($parserErrors.Count -gt 0) {
 & (Join-Path $repositoryRoot 'tests/Test-MessagingOperations.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-MessagingOperationsExport.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-HostingContracts.ps1')
+& (Join-Path $repositoryRoot 'tests/Test-KeycloakAuthorization.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-ComponentBuild.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-PlatformBootstrap.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-PlatformBootstrapExecution.ps1')

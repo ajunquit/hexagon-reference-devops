@@ -168,5 +168,33 @@ $bindingContext.inventory.roots = @($bindingContext.inventory.roots | Where-Obje
 $bound = Get-AwsDeliveryBoundInputs $bindingContext $disabled
 Assert-True ($bound.workloads.api.environment.Count -eq 1 -and $bound.messaging_enabled -eq $false) 'Messaging-free maintenance preserves its inputs.'
 
+# Authorization tasks bind the API image, public identity settings and exactly two credential references.
+$authHosting = Copy-Value $hosting
+$authHosting.inputs.product='hexagon-template'; $authHosting.inputs.database_connection_name='HexagonTemplateDb'
+$authHosting.inputs.auth=@{audience='hexagon-template-api';api_scope='hexagon_template_api.all'}
+$authEnvironment=@{Auth__Authorization__Product='hexagon-template';Auth__Authorization__ResourceServerId='00000000-0000-4000-8000-000000000009';Auth__Authorization__ClientId='hexagon-template-dev-authorization'}
+$authSecret='arn:aws:secretsmanager:us-east-1:123456789012:secret:authorization-AbCdEf'
+$authHosting.inputs.workloads.api.environment=$authEnvironment
+$authHosting.inputs.workloads.api.secret_references=@{Auth__Authorization__ClientSecret=@{secret_arn=$authSecret}}
+$authHosting.outputs.frontend_authentication=@{authority='https://example.cloudfront.net/auth/realms/hexagon'}
+$maintenanceSecret='arn:aws:secretsmanager:us-east-1:123456789012:secret:maintenance-AbCdEf'
+$authHosting.outputs.database_bootstrap.maintenance=@{secret=$maintenanceSecret}
+$authArn="arn:aws:ecs:us-east-1:123456789012:task-definition/$prefix-authorization:3"
+$authHosting.outputs.maintenance_tasks.authorization=@{arn=$authArn}
+$authValues=@{ASPNETCORE_ENVIRONMENT='Production';Auth__Authority=$authHosting.outputs.frontend_authentication.authority;Auth__Audience='hexagon-template-api';Auth__ApiScope='hexagon_template_api.all'}
+foreach($key in $authEnvironment.Keys) {$authValues[$key]=$authEnvironment[$key]}
+$script:definition=@{taskDefinitionArn=$authArn;status='ACTIVE';containerDefinitions=@(@{
+    name='maintenance';image=$authHosting.inputs.workloads.api.image
+    command=@('--migrate-only','--reconcile-auth-authorization','--provision-auth-authorization')
+    environment=@($authValues.Keys | ForEach-Object { @{name=$_;value=$authValues[$_]} })
+    secrets=@(@{name='ConnectionStrings__HexagonTemplateDb';valueFrom=$maintenanceSecret},@{name='Auth__Authorization__ClientSecret';valueFrom=$authSecret})
+})}
+$spec=Get-AwsDeliveryTaskSpec $context $authHosting authorization
+Assert-True (($spec.command -join ',') -ceq '--migrate-only,--reconcile-auth-authorization,--provision-auth-authorization') 'Authorization uses the native API maintenance command.'
+@($script:definition.containerDefinitions[0].environment | Where-Object name -CEQ 'Auth__Authorization__Product')[0].value='hexagon-foreign'
+Assert-Rejected {Get-AwsDeliveryTaskSpec $context $authHosting authorization} 'auth.delivery.environmentChanged'
+@($script:definition.containerDefinitions[0].environment | Where-Object name -CEQ 'Auth__Authorization__Product')[0].value='hexagon-template'
+$script:definition.containerDefinitions[0].secrets[1].valueFrom='arn:aws:secretsmanager:us-east-1:123456789012:secret:foreign-AbCdEf'
+Assert-Rejected {Get-AwsDeliveryTaskSpec $context $authHosting authorization} 'auth.delivery.secretReferenceChanged'
 Exit-AwsLifecycleLease $context -Confirm:$false
 Write-Host "AWS application delivery tests passed: $($script:assertions) assertions; in-memory S3, AWS CLI and registry doubles."

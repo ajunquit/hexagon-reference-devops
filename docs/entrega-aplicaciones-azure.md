@@ -95,6 +95,7 @@ definición y hash de `delivery.json`; cada fila corresponde a un despacho indep
 | `ApplyMaintenance` | Aplica exactamente ese plan después de revisarlo; aún no ejecuta jobs |
 | `Migrations` | Ejecuta o reconcilia el job `--migrate-only`; solo Succeeded acredita migraciones |
 | `DatabaseAccess` | Revalida migraciones y ejecuta el bootstrap de roles, permisos y RLS por identidad |
+| `Authorization` | Para Auth UMA, importa/concilia autorización desde la imagen API y su identidad Keycloak delegada; debe terminar antes del rollout |
 | `PrepareActivation` | Revalida ambas ejecuciones e imágenes; habilita rollout y prepara otro plan |
 | `ApplyActivation` | Revalida las precondiciones y aplica el plan revisado de API y Workers |
 | `PublishWeb` | Publica el candidato SPA con overlay público, sin build y con intención durable |
