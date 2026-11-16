@@ -9,7 +9,7 @@ bindings y la preparación requeridos. No retirar ese requisito para saltar la c
 1. Confirmar el issuer/realm y el UUID del cliente API del destino, conservando las identidades
    existentes. No tomar el UUID o secretos del AppHost local como valores cloud.
 2. Preparar una definición pública KeycloakAuthorization según
-   [la guía](../../../../../docs/preparacion-auth-uma.md). Mantener el secreto delegado en el gestor
+   [la guía](../../../../docs/preparacion-auth-uma.md). Mantener el secreto delegado en el gestor
    del proveedor y entregar al operador el token de bootstrap solo por entorno.
 3. Ejecutar Validate/Plan; revisar el destino y después Apply/Verify con la CLI de preparación.
    El operador crea los clientes/delegación. La API no recibe el token del operador.
