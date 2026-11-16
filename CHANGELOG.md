@@ -2,6 +2,10 @@
 
 ## Sin publicar
 
+- Adopta preparación/entrega Auth UMA desde DevOps `a940b5c` mediante la fábrica. El descriptor dev
+  fija los merges frontend/backend y sus contratos de aceptación con hashes verificados desde
+  GitHub. Incluye guía de adopción; no configura credenciales ni crea infraestructura cloud.
+
 - Sincronización desde DevOps `c150168` mediante la fábrica. Incorpora Floci y sus límites
   de cobertura, las correcciones de bindings y salud AWS, las pruebas y el control de recursos locales.
   El destino de Reference es Azure en `dev`. La validación cloud requiere su orden expresa.
