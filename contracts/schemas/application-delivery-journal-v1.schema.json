@@ -26,7 +26,7 @@
     },
     "jobs": {
       "type": "object", "additionalProperties": false,
-      "properties": { "database-credentials": { "$ref": "#/$defs/job" }, "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "keycloak-database": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" } }
+      "properties": { "database-credentials": { "$ref": "#/$defs/job" }, "migrations": { "$ref": "#/$defs/job" }, "database-access": { "$ref": "#/$defs/job" }, "keycloak-database": { "$ref": "#/$defs/job" }, "acceptance-seed": { "$ref": "#/$defs/job" }, "authorization": { "$ref": "#/$defs/job" }, "acceptance-authorization": { "$ref": "#/$defs/job" } }
     },
     "maintenanceSha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/hash" }] },
     "plan": {

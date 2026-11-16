@@ -151,3 +151,32 @@ Assert-Rejected { & $deliveryModule { param($hosting) Get-AzureDeliveryJobSpec @
 $jobFixture.job = Copy-Value $parent; $jobFixture.job.properties.template.containers[0].env[1].value = '{"role":"maintenance"}'
 Assert-Rejected { & $deliveryModule { param($hosting) Get-AzureDeliveryJobSpec @{} $hosting keycloak-database } $hosting } 'bindingChanged'
 Write-Host 'Integrated identity protocol checks passed: bindings, resource/revision ownership, secret references, issuer/PKCE and job templates; no cloud writes.'
+
+# Native authorization has its own API-image job and only its versioned client credential.
+$authHosting = Copy-Value $hosting
+$authHosting.inputs.product = 'hexagon-example'; $authHosting.inputs.database_connection_name = 'HexagonExampleDb'
+$authHosting.inputs.migration_workload = 'api'; $authHosting.inputs.auth.audience = 'hexagon-example-api'; $authHosting.inputs.auth.api_scope = 'hexagon_example_api.all'
+$authEnvironment = @{ Auth__Authorization__Product = 'hexagon-example'; Auth__Authorization__ResourceServerId = '00000000-0000-4000-8000-000000000009'; Auth__Authorization__ClientId = 'hexagon-example-dev-authorization' }
+$authSecret = @{ secret_uri = "https://examplevault.vault.azure.net/secrets/auth-client/$('4' * 32)"; vault_resource_id = "$scope/providers/Microsoft.KeyVault/vaults/examplevault" }
+$authHosting.inputs.workloads = @{ api = @{ image = "example.azurecr.io/api@sha256:$('a'*64)"; environment = $authEnvironment; secret_references = @{ Auth__Authorization__ClientSecret = $authSecret } } }
+$authId = "$scope/providers/Microsoft.App/jobs/example-dev-auth-prepare"
+$authHosting.state.outputs.maintenance_jobs.authorization = @{id=$authId}
+$authHosting.state.resources += @(@{type='azurerm_container_app_job';id=$authId})
+$authJob = Copy-Value $parent
+$authJob.properties.configuration.secrets = @(@{name='authorization-client';keyVaultUrl=$authSecret.secret_uri;identity=$maintenanceId})
+$authJob.properties.template.containers[0].image = $authHosting.inputs.workloads.api.image
+$authJob.properties.template.containers[0].args = @('--migrate-only','--reconcile-auth-authorization','--provision-auth-authorization')
+$authValues = @{ ASPNETCORE_ENVIRONMENT='Production'; AZURE_CLIENT_ID=$clientId
+    ConnectionStrings__HexagonExampleDb='Host=example-dev-postgres.postgres.database.azure.com;Database=product;Username=example-dev-maintenance;SSL Mode=VerifyFull'
+    Auth__Authority=$authority;Auth__Audience='hexagon-example-api';Auth__ApiScope='hexagon_example_api.all' }
+foreach($key in $authEnvironment.Keys) { $authValues[$key]=$authEnvironment[$key] }
+$authJob.properties.template.containers[0].env = @($authValues.Keys | ForEach-Object { @{name=$_;value=$authValues[$_]} }) + @(@{name='Auth__Authorization__ClientSecret';secretRef='authorization-client'})
+$jobFixture.jobId=$authId; $jobFixture.job=$authJob
+$spec = & $deliveryModule { param($hosting) Get-AzureDeliveryJobSpec @{} $hosting authorization } $authHosting
+& $maintenance { param($template,$expected) Assert-DeliveryJobTemplate $template $expected '' } $authJob.properties.template $spec.expected
+$jobFixture.job = Copy-Value $authJob; $jobFixture.job.properties.configuration.secrets[0].keyVaultUrl='https://other.vault.azure.net/secrets/auth-client'
+Assert-Rejected { & $deliveryModule { param($hosting) Get-AzureDeliveryJobSpec @{} $hosting authorization } $authHosting } 'auth.delivery.secretReferenceChanged'
+$jobFixture.job = Copy-Value $authJob; @($jobFixture.job.properties.template.containers[0].env | Where-Object name -CEQ 'Auth__Authorization__Product')[0].value='hexagon-foreign'
+$spec = & $deliveryModule { param($hosting) Get-AzureDeliveryJobSpec @{} $hosting authorization } $authHosting
+Assert-Rejected { & $maintenance { param($template,$expected) Assert-DeliveryJobTemplate $template $expected '' } $jobFixture.job.properties.template $spec.expected } 'lifecycle.delivery.'
+Write-Host 'Authorization job protocol checks passed with exact public bindings, secret reference and image commands.'

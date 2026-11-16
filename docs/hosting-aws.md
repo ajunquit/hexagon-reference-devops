@@ -89,6 +89,10 @@ tienen capa gratuita.
 
 ## Pendiente
 
+Auth UMA incorpora [preparación de realm/clientes y autorización](preparacion-auth-uma.md), con
+credenciales de Secrets Manager por referencia y mantenimiento separado antes del rollout. La
+preparación y las pruebas locales no reanudan la validación cloud pendiente.
+
 - Entrega (copia OCI por digest, tareas de mantenimiento, rollout, publicación de la SPA e
   invalidación de CloudFront) y Genesis/Apocalypse en AWS.
 - Rotación explícita de credenciales, cuando el dueño la ordene.

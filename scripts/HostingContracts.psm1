@@ -1,4 +1,5 @@
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'AuthorizationDelivery.psm1')
 
 function Read-HostingContract {
     param([string] $Path, [string] $Schema)
@@ -90,6 +91,11 @@ function ConvertTo-HostingInput {
         $physical.http_ports = $workload.httpPorts
         $physical.health_port = $workload.healthPort
         $result.workloads[$workload.id] = $physical
+    }
+    $authorization = Get-HostingAuthorizationBindings $result
+    if ($Backend.identity.ContainsKey('authorization')) {
+        if ($Backend.identity.authorization -cne 'keycloak-uma') { throw 'auth.delivery.requirementUnsupported' }
+        if ($null -eq $authorization) { throw 'auth.delivery.requirementNotBound' }
     }
     return $result
 }

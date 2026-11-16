@@ -124,3 +124,63 @@ run "keycloak_answers_under_auth_on_the_same_origin" {
     error_message = "Keycloak reads its passwords only from its own secrets."
   }
 }
+
+run "authorization_preparation_is_separate_and_uses_only_its_credential" {
+  command = plan
+  variables {
+    maintenance_jobs_enabled = true
+    workloads = {
+      api = {
+        name              = "example-dev-api", kind = "api", image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/example-dev-0001/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        http_ports        = [8080, 8081], health_port = 8081
+        cpu               = 512, memory = 1024, min_replicas = 1, max_replicas = 1
+        environment       = { Auth__Authorization__Product = "hexagon-example", Auth__Authorization__ResourceServerId = "00000000-0000-4000-8000-000000000001", Auth__Authorization__ClientId = "hexagon-example-dev-authorization" }
+        secret_references = { Auth__Authorization__ClientSecret = { secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:example-dev-0001/authorization-AbCdEf" } }
+      }
+    }
+  }
+  assert {
+    condition     = tolist(local.authorization_jobs["authorization"].command) == tolist(["--migrate-only", "--reconcile-auth-authorization", "--provision-auth-authorization"])
+    error_message = "Authorization must finish in an explicit maintenance task before the rollout."
+  }
+  assert {
+    condition     = local.authorization_jobs["authorization"].environment.Auth__Authorization__Product == var.product && !contains(keys(local.authorization_jobs), "acceptance-authorization")
+    error_message = "Authorization binds the product; acceptance authorization exists only with its isolated fixture."
+  }
+  assert {
+    condition     = local.authorization_jobs["authorization"].secrets[1].name == "Auth__Authorization__ClientSecret" && local.authorization_jobs["authorization"].secrets[1].valueFrom == var.workloads.api.secret_references.Auth__Authorization__ClientSecret.secret_arn
+    error_message = "The authorization task consumes a Secrets Manager reference without serializing its value."
+  }
+}
+
+run "reject_authorization_foreign_product" {
+  command = plan
+  variables {
+    workloads = {
+      api = {
+        name              = "example-dev-api", kind = "api", image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/example-dev-0001/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        http_ports        = [8080, 8081], health_port = 8081
+        cpu               = 512, memory = 1024, min_replicas = 1, max_replicas = 1
+        environment       = { Auth__Authorization__Product = "hexagon-foreign", Auth__Authorization__ResourceServerId = "00000000-0000-4000-8000-000000000001", Auth__Authorization__ClientId = "hexagon-example-dev-authorization" }
+        secret_references = { Auth__Authorization__ClientSecret = { secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:example-dev-0001/authorization-AbCdEf" } }
+      }
+    }
+  }
+  expect_failures = [var.workloads]
+}
+
+run "reject_authorization_missing_credential" {
+  command = plan
+  variables {
+    workloads = {
+      api = {
+        name              = "example-dev-api", kind = "api", image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/example-dev-0001/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        http_ports        = [8080, 8081], health_port = 8081
+        cpu               = 512, memory = 1024, min_replicas = 1, max_replicas = 1
+        environment       = { Auth__Authorization__Product = "hexagon-example", Auth__Authorization__ResourceServerId = "00000000-0000-4000-8000-000000000001", Auth__Authorization__ClientId = "hexagon-example-dev-authorization" }
+        secret_references = {}
+      }
+    }
+  }
+  expect_failures = [var.workloads]
+}

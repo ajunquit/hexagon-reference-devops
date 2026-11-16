@@ -77,7 +77,7 @@ locals {
       secrets     = local.jobs.migrations.secrets
     }
   }
-  maintenance_tasks = var.maintenance_jobs_enabled ? merge(local.jobs, local.acceptance_jobs, local.identity_jobs) : {}
+  maintenance_tasks = var.maintenance_jobs_enabled ? merge(local.jobs, local.acceptance_jobs, local.identity_jobs, local.authorization_jobs) : {}
   task_trust = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -88,7 +88,7 @@ locals {
   # Secrets each execution role may read to start its containers, and nothing else.
   execution_secrets = merge(
     { for id, workload in var.workloads : id => concat([for secret in values(workload.secret_references) : secret.secret_arn], [aws_secretsmanager_secret.workload_connection[id].arn]) },
-    { maintenance = [local.administrator_secret, aws_secretsmanager_secret.maintenance_connection.arn] },
+    { maintenance = concat([local.administrator_secret, aws_secretsmanager_secret.maintenance_connection.arn], local.authorization_enabled ? [local.authorization_secret] : []) },
     local.keycloak_enabled ? { keycloak = [for secret in aws_secretsmanager_secret.keycloak : secret.arn] } : {}
   )
 }

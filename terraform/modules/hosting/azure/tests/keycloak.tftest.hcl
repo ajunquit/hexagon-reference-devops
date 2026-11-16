@@ -132,3 +132,63 @@ run "reject_shared_secret_name_even_with_different_versions" {
   }
   expect_failures = [var.keycloak]
 }
+
+run "authorization_preparation_is_separate_and_uses_only_its_credential" {
+  command = plan
+  variables {
+    maintenance_jobs_enabled = true
+    workloads = {
+      api = {
+        name              = "example-dev-api", kind = "api", image = "exampledev0001.azurecr.io/example-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        http_ports        = [8080, 8081], health_port = 8081
+        cpu               = 0.5, memory = "1Gi", min_replicas = 1, max_replicas = 1
+        environment       = { Auth__Authorization__Product = "hexagon-example", Auth__Authorization__ResourceServerId = "00000000-0000-4000-8000-000000000001", Auth__Authorization__ClientId = "hexagon-example-dev-authorization" }
+        secret_references = { Auth__Authorization__ClientSecret = { secret_uri = "https://examplevault.vault.azure.net/secrets/authorization-client/44444444444444444444444444444444", vault_resource_id = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-example-dev-hosting/providers/Microsoft.KeyVault/vaults/examplevault" } }
+      }
+    }
+  }
+  assert {
+    condition     = azurerm_container_app_job.maintenance["authorization"].template[0].container[0].args == tolist(["--migrate-only", "--reconcile-auth-authorization", "--provision-auth-authorization"])
+    error_message = "Authorization must finish in an explicit maintenance task before the rollout."
+  }
+  assert {
+    condition     = local.authorization_jobs["authorization"].environment.Auth__Authorization__Product == var.product && !contains(keys(local.authorization_jobs), "acceptance-authorization")
+    error_message = "Authorization binds the product; acceptance authorization exists only with its isolated fixture."
+  }
+  assert {
+    condition     = length(azurerm_role_assignment.authorization_secret) == 2 && one(azurerm_container_app_job.maintenance["authorization"].secret).key_vault_secret_id == var.workloads.api.secret_references.Auth__Authorization__ClientSecret.secret_uri
+    error_message = "Only API and maintenance may read the exact client credential, never the bootstrap password."
+  }
+}
+
+run "reject_authorization_foreign_product" {
+  command = plan
+  variables {
+    workloads = {
+      api = {
+        name              = "example-dev-api", kind = "api", image = "exampledev0001.azurecr.io/example-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        http_ports        = [8080, 8081], health_port = 8081
+        cpu               = 0.5, memory = "1Gi", min_replicas = 1, max_replicas = 1
+        environment       = { Auth__Authorization__Product = "hexagon-foreign", Auth__Authorization__ResourceServerId = "00000000-0000-4000-8000-000000000001", Auth__Authorization__ClientId = "hexagon-example-dev-authorization" }
+        secret_references = { Auth__Authorization__ClientSecret = { secret_uri = "https://examplevault.vault.azure.net/secrets/authorization-client/44444444444444444444444444444444", vault_resource_id = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-example-dev-hosting/providers/Microsoft.KeyVault/vaults/examplevault" } }
+      }
+    }
+  }
+  expect_failures = [var.workloads]
+}
+
+run "reject_authorization_missing_credential" {
+  command = plan
+  variables {
+    workloads = {
+      api = {
+        name              = "example-dev-api", kind = "api", image = "exampledev0001.azurecr.io/example-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        http_ports        = [8080, 8081], health_port = 8081
+        cpu               = 0.5, memory = "1Gi", min_replicas = 1, max_replicas = 1
+        environment       = { Auth__Authorization__Product = "hexagon-example", Auth__Authorization__ResourceServerId = "00000000-0000-4000-8000-000000000001", Auth__Authorization__ClientId = "hexagon-example-dev-authorization" }
+        secret_references = {}
+      }
+    }
+  }
+  expect_failures = [var.workloads]
+}

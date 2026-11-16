@@ -6,7 +6,7 @@ locals {
   api_id         = one([for id, workload in var.workloads : id if workload.kind == "api"])
   database_host  = azurerm_postgresql_flexible_server.this.fqdn
   vault_access = merge([for id, workload in var.workloads : {
-    for scope in distinct([for secret in values(workload.secret_references) : secret.vault_resource_id]) : "${id}/${sha1(scope)}" => { workload = id, scope = scope }
+    for scope in distinct([for name, secret in workload.secret_references : secret.vault_resource_id if name != "Auth__Authorization__ClientSecret"]) : "${id}/${sha1(scope)}" => { workload = id, scope = scope }
   }]...)
   bootstrap = merge({
     host          = local.database_host, database = var.database_name,
@@ -202,8 +202,8 @@ resource "azurerm_static_web_app" "this" {
   tags                = local.tags
 }
 resource "azurerm_container_app_job" "maintenance" {
-  for_each                     = var.maintenance_jobs_enabled ? merge(local.jobs, local.acceptance_jobs, local.identity_jobs) : {}
-  name                         = "${var.name_prefix}-${lookup({ database-access = "db-access", acceptance-seed = "e2e-seed", keycloak-database = "kc-database" }, each.key, each.key)}"
+  for_each                     = var.maintenance_jobs_enabled ? merge(local.jobs, local.acceptance_jobs, local.identity_jobs, local.authorization_jobs) : {}
+  name                         = "${var.name_prefix}-${lookup({ database-access = "db-access", acceptance-seed = "e2e-seed", keycloak-database = "kc-database", authorization = "auth-prepare", acceptance-authorization = "e2e-auth" }, each.key, each.key)}"
   resource_group_name          = data.azurerm_resource_group.this.name
   location                     = var.location
   container_app_environment_id = azurerm_container_app_environment.this.id
@@ -229,6 +229,14 @@ resource "azurerm_container_app_job" "maintenance" {
       identity            = azurerm_user_assigned_identity.maintenance.id
     }
   }
+  dynamic "secret" {
+    for_each = contains(["authorization", "acceptance-authorization"], each.key) ? { authorization = local.authorization_secret } : {}
+    content {
+      name                = "authorization-client"
+      key_vault_secret_id = secret.value.secret_uri
+      identity            = azurerm_user_assigned_identity.maintenance.id
+    }
+  }
   template {
     container {
       name   = "maintenance"
@@ -250,10 +258,17 @@ resource "azurerm_container_app_job" "maintenance" {
           value = env.value
         }
       }
+      dynamic "env" {
+        for_each = contains(["authorization", "acceptance-authorization"], each.key) ? [1] : []
+        content {
+          name        = "Auth__Authorization__ClientSecret"
+          secret_name = "authorization-client"
+        }
+      }
     }
   }
   tags       = local.tags
-  depends_on = [azurerm_role_assignment.image_pull, azurerm_postgresql_flexible_server_active_directory_administrator.maintenance, azurerm_postgresql_flexible_server_database.this, azurerm_role_assignment.keycloak_preparation_secret]
+  depends_on = [azurerm_role_assignment.image_pull, azurerm_postgresql_flexible_server_active_directory_administrator.maintenance, azurerm_postgresql_flexible_server_database.this, azurerm_role_assignment.keycloak_preparation_secret, azurerm_role_assignment.authorization_secret]
 }
 resource "azurerm_container_app" "workload" {
   for_each                     = var.application_rollout_enabled ? var.workloads : {}
@@ -345,5 +360,5 @@ resource "azurerm_container_app" "workload" {
     }
   }
   tags       = local.tags
-  depends_on = [azurerm_role_assignment.image_pull, azurerm_role_assignment.secret_read]
+  depends_on = [azurerm_role_assignment.image_pull, azurerm_role_assignment.secret_read, azurerm_role_assignment.authorization_secret]
 }

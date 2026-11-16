@@ -84,6 +84,10 @@ del certificado. Se usa una réplica, 0.5 CPU/1 GiB y pool de conexiones pequeñ
 
 ## Orden de entrega
 
+Auth UMA completa la configuración del realm/cliente y agrega mantenimiento de autorización antes
+del rollout. Seguir [preparación Auth UMA](preparacion-auth-uma.md): conserva issuer, UUID e identidad
+existentes, privilegios acotados y políticas de runtime. Esta guía no habilita ejecución cloud.
+
 Los comandos siguen [la guía de entrega](entrega-aplicaciones-azure.md), con los mismos hashes,
 lease, Environment y revisión de planes. Los flags no se cambian a mano para saltarse etapas.
 
@@ -98,9 +102,9 @@ lease, Environment y revisión de planes. Los flags no se cambian a mano para sa
    elevado, con membresías o un esquema de otro propietario bloquean la preparación.
 5. `PrepareIdentity` / `ApplyIdentity` revisan y aplican exclusivamente la activación del proceso
    Keycloak dentro del root de hosting. No activan el backend.
-6. Configurar el realm y el cliente público del producto, redirects, origen web, audiencia y
-   permisos coherentes con sus contratos, usando un procedimiento revisado del operador. Este
-   PR no automatiza la administración de Keycloak ni implementa el módulo Auth. El bootstrap
+6. Preparar el realm y el cliente público del producto con
+   [Invoke-KeycloakAuthorization](preparacion-auth-uma.md), conservando issuer, UUID e identidad
+   existentes. Se validan redirects, audiencia/scopes y la delegación administrativa. El bootstrap
    administrativo de Keycloak solo resuelve el acceso inicial; cambiar su secreto no rota por
    sí solo la contraseña de un administrador que ya existe.
 7. `Migrations` exige evidencia SQL y valida contra ARM la revisión de Keycloak, su imagen,
@@ -109,7 +113,9 @@ lease, Environment y revisión de planes. Los flags no se cambian a mano para sa
 8. `DatabaseAccess` concede acceso runtime a los esquemas Hexagon y comprueba que los roles runtime
    no tengan acceso a `keycloak`. Un permiso inesperado bloquea la transacción; este job no toma
    propiedad del esquema para corregir permisos de identidad.
-   Continúan `PrepareActivation` / `ApplyActivation`, `PublishWeb`, `VerifyServing` y aceptación.
+   Cuando el backend declara UMA, ejecutar `Authorization` con la imagen API y su identidad
+   delegada. Continúan `PrepareActivation` / `ApplyActivation`, `PublishWeb`, `VerifyServing` y
+   aceptación; sus tenants ficticios tienen una preparación de autorización independiente.
 
 Una rotación SQL requiere un mantenimiento planificado: fijar una nueva versión y volver a
 preparar con el proceso detenido, actualizar referencias y validar antes de reactivar. No se
