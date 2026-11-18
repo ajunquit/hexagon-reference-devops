@@ -8,7 +8,7 @@
     {
       "name": "web",
       "repository": "ajunquit/hexagon-reference-ng",
-      "commit": "d2448ef7b9e9c40ac92ae3e0d69f04d4b8d230ed",
+      "commit": "806f87b76028a83049a2e99c7035a5904ae8e525",
       "manifests": [
         {
           "path": ".hexagon/frontend-hosting-requirements.json",
@@ -23,7 +23,7 @@
     {
       "name": "backend",
       "repository": "ajunquit/hexagon-reference-dotnet-ml",
-      "commit": "06916e335c64313569994a60e4d35c9ca93b2288",
+      "commit": "59bfa4773f2d852f1e02e51132777d78084f7034",
       "manifests": [
         {
           "path": ".hexagon/messaging-requirements.json",

@@ -2,6 +2,10 @@
 
 ## Sin publicar
 
+- Fija en el descriptor dev las aplicaciones con Settings (PLAT-01): frontend `806f87b` y backend
+  `59bfa47`, con hashes verificados desde GitHub. Añade la guía `README-settings.md`. No crea
+  infraestructura ni concede operaciones UMA: se conceden explícitamente en la administración Auth.
+
 - Adopta preparación/entrega Auth UMA desde DevOps `a940b5c` mediante la fábrica. El descriptor dev
   fija los merges frontend/backend y sus contratos de aceptación con hashes verificados desde
   GitHub. Incluye guía de adopción; no configura credenciales ni crea infraestructura cloud.
