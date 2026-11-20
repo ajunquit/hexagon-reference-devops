@@ -26,6 +26,7 @@ if ($Mode -cin @('Prepare', 'Apply', 'Migrate', 'Verify')) {
     & (Join-Path $PSScriptRoot 'Invoke-PlatformBootstrapStage.ps1') -Definition $Definition -Mode $Mode -Stage $Stage -Workspace $Workspace -ReviewSha256 $ReviewSha256 -DiagnosticRunId $DiagnosticRunId -WhatIf:$WhatIfPreference
     exit $LASTEXITCODE
 }
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1') -Force
 $parsed = $null
 try {
@@ -46,7 +47,7 @@ catch {
     $result = New-PlatformBootstrapResult -Mode $Mode -Status $(if ($invalidDefinition) { 'Invalid' } else { 'Blocked' }) -Parsed $parsed -Checks @(@{ code = $code; status = 'Blocked' })
 }
 if ($Output -and $WhatIfPreference) { $result.checks += @{ code = 'bootstrap.outputSkipped'; status = 'Pass' } }
-$json = ConvertTo-PlatformBootstrapJson $result
+$json = ConvertTo-CanonicalJson $result
 $resultSchema = Join-Path (Split-Path -Parent $PSScriptRoot) 'contracts/schemas/platform-bootstrap-result-v1.schema.json'
 if (-not ($json | Test-Json -SchemaFile $resultSchema -ErrorAction SilentlyContinue)) { throw 'Invalid bootstrap result.' }
 if ($Output -and -not $WhatIfPreference -and $PSCmdlet.ShouldProcess($Output, 'Write bootstrap result JSON')) {

@@ -72,7 +72,7 @@ public sealed class RabbitMqRuntimeTests
         using var harness = new OperationHarness();
         harness.SetEnvironment("HEXAGON_OPERATIONS_CONNECTION_STRING", connectionUri.ToString());
         harness.SetEnvironment("HEXAGON_OPERATIONS_RABBITMQ_MANAGEMENT_URL", managementUri.ToString());
-        var target = OperationHarness.Target("rabbitmq");
+        var target = OperationHarness.Target();
         var inspection = await harness.RunAsync(target, "inspect");
         Assert.True(inspection.ExitCode == 0, inspection.Output);
         await WaitForCountAsync(channel, "sales-worker-dlq", 1);

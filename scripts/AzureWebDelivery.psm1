@@ -1,7 +1,7 @@
 Import-Module (Join-Path $PSScriptRoot 'AzureKeycloakDelivery.psm1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('AzureEnvironmentStore', 'LifecycleNative', 'EnvironmentSnapshot', 'PlatformBootstrap', 'StaticWebPublication', 'StaticWebClient', 'ApplicationArtifacts', 'ApplicationContracts')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
+foreach ($name in @('AzureEnvironmentStore', 'LifecycleNative', 'EnvironmentSnapshot', 'CanonicalJson', 'StaticWebPublication', 'AzureWebHost', 'StaticWebClient', 'ApplicationArtifacts', 'ApplicationContracts', 'AzureOciDelivery')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
 
 function Get-WebDeliveryAzureObject([hashtable] $Context, [string] $Id, [string] $Version = '2024-03-01') {
     if ($Id -match '[?#%\\\s]|/[.][.]?(?:/|$)') { throw 'lifecycle.web.resourceIdInvalid' }
@@ -109,7 +109,9 @@ function Get-AzureBackendHealth([hashtable] $Context, [hashtable] $Hosting) {
 
 function New-AzureWebPayload([hashtable] $Context, [hashtable] $Delivery, [hashtable] $Release, [hashtable] $Hosting, [string] $DeliverySha256) {
     $renew = (Get-Command Assert-AzureLifecycleLease).ScriptBlock; $heartbeat = { & $renew $Context }.GetNewClosure()
-    $candidates = Receive-ApplicationCandidates $Delivery $Release $Hosting.registry.login_server (Join-Path $Context.runtime "web-candidate-$([guid]::NewGuid().ToString('N'))") $heartbeat -ComponentNames web -Confirm:$false
+    $imageRegistry = $Hosting.registry.login_server; $resolveImage = (Get-Command Get-AzureDeliveryImageTarget).ScriptBlock
+    $imageTarget = { param($reference) & $resolveImage $reference $imageRegistry }.GetNewClosure()
+    $candidates = Receive-ApplicationCandidates $Delivery $Release $imageTarget (Join-Path $Context.runtime "web-candidate-$([guid]::NewGuid().ToString('N'))") $heartbeat -ComponentNames web -Confirm:$false
     $source = @($Release.sources | Where-Object name -CEQ 'web')[0]
     $previousToken = $env:GH_TOKEN
     try {
@@ -121,7 +123,7 @@ function New-AzureWebPayload([hashtable] $Context, [hashtable] $Delivery, [hasht
     if (@($source.manifests | Where-Object { $_.path -ceq '.hexagon/frontend-hosting-requirements.json' -and $_.sha256 -ceq $manifest.Sha256 }).Count -ne 1) { throw 'lifecycle.web.manifestMismatch' }
     $outputs = @{ api_url = @{ value = $Hosting.state.outputs.api_url }; frontend_authentication = @{ value = $Hosting.state.outputs.frontend_authentication } }
     $artifact = $candidates.web.build.artifacts[0]
-    return New-StaticWebPayload (Join-Path $candidates.web.directory $artifact.file) $Release.artifacts.web.sha256 $manifest.Manifest $outputs $Context.inventory.releaseSha256 $DeliverySha256 (Join-Path $Context.runtime "spa-$([guid]::NewGuid().ToString('N'))") -Confirm:$false
+    return New-StaticWebPayload (Join-Path $candidates.web.directory $artifact.file) $Release.artifacts.web.sha256 $manifest.Manifest $outputs $Context.inventory.releaseSha256 $DeliverySha256 (Join-Path $Context.runtime "spa-$([guid]::NewGuid().ToString('N'))") -Confirm:$false -HostFiles (Get-AzureStaticWebHostFiles)
 }
 
 function Publish-AzureWebPayload {

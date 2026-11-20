@@ -6,6 +6,8 @@
 param([Parameter(Mandatory)] [string] $Archive)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'StaticWebConfiguration.psm1')
+$reserved = @(Get-StaticWebReservedNames | Where-Object { $_ -cne 'hexagon-deployment.json' })
 $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Archive).Path)
 $gzip = [IO.Compression.GZipStream]::new($file, [IO.Compression.CompressionMode]::Decompress)
 $tar = [System.Formats.Tar.TarReader]::new($gzip)
@@ -22,7 +24,7 @@ try {
         if ($name.StartsWith('/') -or $name.Contains('\') -or $name -match '(^|/)\.\.?(/|$)|//' -or $name.Contains(':') -or $name -match '[\r\n]') { throw 'Unsafe static bundle path.' }
         if ($entry.EntryType -eq [System.Formats.Tar.TarEntryType]::Directory) { continue }
         if ($entry.EntryType -notin @([System.Formats.Tar.TarEntryType]::RegularFile, [System.Formats.Tar.TarEntryType]::V7RegularFile) -or -not $names.Add($name)) { throw 'Unsafe or duplicate static bundle entry.' }
-        if ($name -cin @('runtime-config.json', 'staticwebapp.config.json') -or $name -match '(^|/)\.[^/]+|[.](map|pem|pfx|key|nupkg)$') { throw 'Deployment bindings, secrets or source maps are forbidden in the SPA bundle.' }
+        if ($name -cin $reserved -or $name -match '(^|/)\.[^/]+|[.](map|pem|pfx|key|nupkg)$') { throw 'Deployment bindings, secrets or source maps are forbidden in the SPA bundle.' }
         if ($name -ceq 'index.html') { $foundIndex = $true }
     }
 } finally { $tar.Dispose(); $gzip.Dispose(); $file.Dispose() }

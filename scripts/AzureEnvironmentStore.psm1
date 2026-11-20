@@ -1,12 +1,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentLifecycle.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
-
-function Get-LifecycleBytesHash([byte[]] $Bytes) {
-    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
-}
 
 function Get-LifecycleAzureToken([hashtable] $Context, [string] $Resource) {
     if ($Context.tokens.ContainsKey($Resource) -and $Context.tokens[$Resource].expires -gt [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 60) { return $Context.tokens[$Resource].value }
@@ -153,8 +149,8 @@ function Get-AzureLifecycleJournal([hashtable] $Context) {
     catch { throw 'lifecycle.azure.journalInvalid' }
     $expected = $Context.inventory
     if ($inventory.product -cne $expected.product -or $inventory.environment -cne $expected.environment -or
-        (ConvertTo-PlatformBootstrapJson $inventory.instance) -cne (ConvertTo-PlatformBootstrapJson $expected.instance) -or
-        (ConvertTo-PlatformBootstrapJson $inventory.target) -cne (ConvertTo-PlatformBootstrapJson $expected.target)) { throw 'lifecycle.azure.journalTargetMismatch' }
+        (ConvertTo-CanonicalJson $inventory.instance) -cne (ConvertTo-CanonicalJson $expected.instance) -or
+        (ConvertTo-CanonicalJson $inventory.target) -cne (ConvertTo-CanonicalJson $expected.target)) { throw 'lifecycle.azure.journalTargetMismatch' }
     $Context.remoteEtag = $response.headers.ETag; $Context.remoteRevision = $inventory.revision; $Context.remoteHash = Get-LifecycleBytesHash $response.bytes
     return @{ inventory = $inventory; bytes = $response.bytes }
 }
@@ -185,8 +181,8 @@ function Save-AzureLifecycleJournal {
     Assert-AzureLifecycleLease $Context
     $inventory = Read-EnvironmentInventory $Path
     if ($inventory.product -cne $Context.inventory.product -or $inventory.environment -cne $Context.inventory.environment -or
-        (ConvertTo-PlatformBootstrapJson $inventory.instance) -cne (ConvertTo-PlatformBootstrapJson $Context.inventory.instance) -or
-        (ConvertTo-PlatformBootstrapJson $inventory.target) -cne (ConvertTo-PlatformBootstrapJson $Context.inventory.target) -or
+        (ConvertTo-CanonicalJson $inventory.instance) -cne (ConvertTo-CanonicalJson $Context.inventory.instance) -or
+        (ConvertTo-CanonicalJson $inventory.target) -cne (ConvertTo-CanonicalJson $Context.inventory.target) -or
         $inventory.iac.snapshotSha256 -cne $Context.inventory.iac.snapshotSha256) { throw 'lifecycle.azure.journalTargetMismatch' }
     if ($inventory.revision -ne $Context.remoteRevision + 1) { throw 'lifecycle.azure.journalRevisionMismatch' }
     $bytes = [IO.File]::ReadAllBytes($Path); $hash = Get-LifecycleBytesHash $bytes
@@ -202,4 +198,4 @@ function Save-AzureLifecycleJournal {
         storageAccount = $inventory.target.storageAccount; container = $inventory.target.container; snapshotSha256 = $inventory.iac.snapshotSha256 }
 }
 
-Export-ModuleMember -Function New-AzureLifecycleContext, Enter-AzureLifecycleLease, Assert-AzureLifecycleLease, Exit-AzureLifecycleLease, Get-AzureLifecycleJournal, Save-AzureLifecycleJournal, Publish-AzureLifecycleObject, Read-AzureLifecycleObject, Invoke-AzureLifecycleHttp, Get-LifecycleBytesHash
+Export-ModuleMember -Function New-AzureLifecycleContext, Enter-AzureLifecycleLease, Assert-AzureLifecycleLease, Exit-AzureLifecycleLease, Get-AzureLifecycleJournal, Save-AzureLifecycleJournal, Publish-AzureLifecycleObject, Read-AzureLifecycleObject, Invoke-AzureLifecycleHttp

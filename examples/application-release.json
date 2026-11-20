@@ -33,9 +33,9 @@
   ],
   "artifacts": {
     "backend": {
-      "hexagon-example-api": "exampledev0001.azurecr.io/hexagon-example-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "hexagon-example-worker": "exampledev0001.azurecr.io/hexagon-example-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "hexagon-example-sales-worker": "exampledev0001.azurecr.io/hexagon-example-sales-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      "hexagon-example-api": "registry.example.test/hexagon-example-api@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "hexagon-example-worker": "registry.example.test/hexagon-example-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "hexagon-example-sales-worker": "registry.example.test/hexagon-example-sales-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     },
     "web": {
       "uri": "https://artifacts.example.test/releases/1111111111111111111111111111111111111111/web.tar.gz",
@@ -44,7 +44,7 @@
     "databaseBootstrap": {
       "repository": "ajunquit/hexagon-example-devops",
       "commit": "3333333333333333333333333333333333333333",
-      "image": "exampledev0001.azurecr.io/database-bootstrap@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      "image": "registry.example.test/database-bootstrap@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     }
   }
 }

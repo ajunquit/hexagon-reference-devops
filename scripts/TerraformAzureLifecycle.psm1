@@ -4,7 +4,7 @@ Import-Module (Join-Path $PSScriptRoot 'EnvironmentLifecycle.psm1')
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentSnapshot.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AzureEnvironmentStore.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 
 function Get-AzureLifecycleCollection([hashtable] $Context, [string] $Uri) {
     $items = [Collections.Generic.List[object]]::new(); $visited = [Collections.Generic.HashSet[string]]::new()
@@ -131,7 +131,7 @@ function Get-AzureLifecycleWorkloadPrincipals([hashtable] $Context) {
 
 function ConvertTo-AzureMessagingPrincipalInput([hashtable] $InputValue, [hashtable] $Principals) {
     if ($InputValue.destinations -isnot [Collections.IDictionary] -or $InputValue.consumers -isnot [Collections.IDictionary]) { throw 'lifecycle.azure.messagingInputInvalid' }
-    $value = (ConvertTo-PlatformBootstrapJson $InputValue) | ConvertFrom-Json -AsHashtable -Depth 32
+    $value = (ConvertTo-CanonicalJson $InputValue) | ConvertFrom-Json -AsHashtable -Depth 32
     foreach ($destination in $value.destinations.Values) {
         foreach ($key in @($destination.publishers.Keys)) {
             if (-not $Principals.ContainsKey($key)) { throw 'lifecycle.azure.publisherIdentityMissing' }
@@ -213,7 +213,7 @@ function Initialize-AzureLifecycleTerraform([hashtable] $Context, [hashtable] $R
         container_name = $Context.inventory.target.container; key = $Root.stateKey; subscription_id = $Context.inventory.target.subscriptionId; tenant_id = $Context.inventory.target.tenantId
         use_azuread_auth = $true; use_cli = $true; use_oidc = $false }
     $path = Join-Path $Context.runtime "$($Root.id)-backend.json"
-    [IO.File]::WriteAllText($path, (ConvertTo-PlatformBootstrapJson $backend))
+    [IO.File]::WriteAllText($path, (ConvertTo-CanonicalJson $backend))
     $result = Invoke-AzureLifecycleTerraform $Context $Root @('init', '-input=false', '-reconfigure', '-lockfile=readonly', '-no-color', "-backend-config=$path")
     if ($result.exitCode -ne 0) { throw 'lifecycle.azure.terraformInitFailed' }
 }
@@ -358,7 +358,7 @@ function Get-AzureLifecycleDestructionSafety([hashtable] $Context, [object] $Req
         }
     }
     $evidence = @{ product = $Request.product; environment = $Request.environment; instanceId = $Request.instanceId; rootId = $Request.root.id; observedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); resources = $facts }
-    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $evidence)); $hash = Get-LifecycleBytesHash $bytes
+    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $evidence)); $hash = Get-LifecycleBytesHash $bytes
     Publish-AzureLifecycleObject $Context "$($Context.prefix)/evidence/$hash.json" $bytes $hash
     return @{ quiesced = $true; backupVerified = $false; evidenceSha256 = $hash; product = $Request.product; environment = $Request.environment; instanceId = $Request.instanceId; rootId = $Request.root.id }
 }

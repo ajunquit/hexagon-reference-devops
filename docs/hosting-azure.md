@@ -27,7 +27,7 @@ coherente antes de adoptarlo. Se puede referenciar un emisor externo o adoptar e
 [Keycloak integrado en dev](auth-y-base-compartida.md), con una sola base de aplicación y esquema
 dedicado. Este perfil añade un proceso y un job SQL, sin implementar el módulo Auth. Requiere
 Terraform >= 1.11 y tres referencias versionadas a secretos preparados por el operador. Tampoco se crea un clúster
-RabbitMQ ni infraestructura de AWS desde este módulo. Sus hosts y credenciales deben resolverse
+RabbitMQ ni infraestructura de otra nube desde este módulo. Sus hosts y credenciales deben resolverse
 antes de seleccionarlos para una combinación distinta de la referencia Azure.
 
 ## Contratos, política y artefactos

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Narrows the cloud definitions of local-messaging-bindings-v1.schema.json for RabbitMQ, the provider of the core; scripts/ContractSchemas.psm1 composes them.",
+  "$defs": {
+    "cloudWorkloadSettings": {
+      "propertyNames": {
+        "pattern": "^Messaging__RabbitMq__[A-Za-z0-9_-]+(?:__[A-Za-z0-9_-]+)*$"
+      }
+    }
+  }
+}

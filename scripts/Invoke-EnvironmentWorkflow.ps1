@@ -18,27 +18,26 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentWorkflow.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'EphemeralEnvironment.psm1')
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentLifecycle.psm1')
-Import-Module (Join-Path $PSScriptRoot 'AzureEnvironmentStore.psm1')
-Import-Module (Join-Path $PSScriptRoot 'AwsEnvironmentStore.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CloudAdapters.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
+Import-Module (Join-Path $PSScriptRoot 'ContractSchemas.psm1')
 $status = 'Blocked'; $code = $null; $details = @{}
 try {
     $repository = Split-Path -Parent $PSScriptRoot
     $definitionPath = Join-Path $repository ".config/environments/$Environment/$InstanceId/definition.json"
     $definition = Assert-EphemeralTrackedDefinition $definitionPath $DefinitionSha256 $Environment $InstanceId $Operation
     $inventory = $definition.inventory
-    $aws = $inventory.target.ContainsKey('accountId')
+    $adapter = Get-CloudAdapter $inventory
     if ($WhatIfPreference) { $status = 'Unverified' }
     elseif ($PSCmdlet.ShouldProcess("$($inventory.product)/$Environment/$InstanceId", "$Mode $Operation stage")) {
         $expectedWorkflow = $(if ($Operation -ceq 'Create') { 'genesis' } else { 'apocalypse' })
         if ($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_REF -cne 'refs/heads/main' -or
-            $env:GITHUB_REPOSITORY -ine $inventory.iac.repository -or $env:GITHUB_WORKFLOW_REF -cne "$($inventory.iac.repository)/.github/workflows/$expectedWorkflow.yml@refs/heads/main") { throw 'lifecycle.azure.trustedWorkflowRequired' }
+            $env:GITHUB_REPOSITORY -ine $inventory.iac.repository -or $env:GITHUB_WORKFLOW_REF -cne "$($inventory.iac.repository)/.github/workflows/$expectedWorkflow.yml@refs/heads/main") { throw 'lifecycle.trustedWorkflowRequired' }
         Assert-EphemeralRepository $definition
         $githubEnvironment = Get-EphemeralGithubProtection $definition -SkipBindings
         if ($Mode -ceq 'Validate') {
-            $details = $(if ($aws) { @{ provider = 'aws'; accountId = $inventory.target.accountId; region = $inventory.target.region; roleArn = $inventory.target.roleArn; githubEnvironment = $githubEnvironment } }
-                else { @{ provider = 'azure'; clientId = $inventory.target.clientId; tenantId = $inventory.target.tenantId; subscriptionId = $inventory.target.subscriptionId; githubEnvironment = $githubEnvironment } })
+            $details = Invoke-CloudAdapter $adapter Get-CloudTargetDetails @($inventory, $githubEnvironment)
             $status = 'Validated'
         }
         else {
@@ -47,33 +46,20 @@ try {
             }
             $directory = New-EphemeralWorkspace (Join-Path $repository "artifacts/lifecycle-$([guid]::NewGuid().ToString('N'))") -Confirm:$false
             $initialPath = Join-Path $directory 'initial-inventory.json'
-            [IO.File]::WriteAllText($initialPath, (ConvertTo-PlatformBootstrapJson $inventory) + "`n")
+            [IO.File]::WriteAllText($initialPath, (ConvertTo-CanonicalJson $inventory) + "`n")
             $workspace = Join-Path $directory 'work'
-            $entry = Join-Path $PSScriptRoot $(if ($aws) { 'Invoke-AwsEnvironment.ps1' } else { 'Invoke-AzureEnvironment.ps1' })
-            $resultVersion = $(if ($aws) { 'hexagon.ec/aws-environment-result/v1' } else { 'hexagon.ec/azure-environment-result/v1' })
+            $entry = Join-Path $PSScriptRoot (Invoke-CloudAdapter $adapter Get-CloudEnvironmentEntry)
+            $resultVersion = Invoke-CloudAdapter $adapter Get-CloudEnvironmentResultVersion
             $profileDirectory = Split-Path -Parent $definitionPath
             $port = {
                 param($action)
-                if ($action -ceq 'Probe' -and $aws) {
-                    $caller = Invoke-LifecycleCommand aws @('sts', 'get-caller-identity', '--region', $inventory.target.region, '--output', 'json') -TimeoutSeconds 45
-                    if ($caller.exitCode -ne 0) { throw 'lifecycle.aws.accountUnavailable' }
-                    $identity = $caller.text | ConvertFrom-Json -AsHashtable
-                    $context = New-AwsLifecycleContext $inventory $identity.Arn $identity.Account
-                    try {
-                        Enter-AwsLifecycleLease $context -Confirm:$false
-                        $journal = Get-AwsLifecycleJournal $context
-                        return @{ status = 'Probed'; inventory = $(if ($null -eq $journal) { $null } else { $journal.inventory }) }
-                    }
-                    finally { Exit-AwsLifecycleLease $context -Confirm:$false }
-                }
                 if ($action -ceq 'Probe') {
-                    $context = New-AzureLifecycleContext $inventory
+                    $context = Invoke-CloudAdapter $adapter Enter-CloudLifecycle @($inventory, $false)
                     try {
-                        Enter-AzureLifecycleLease $context -Confirm:$false
-                        $journal = Get-AzureLifecycleJournal $context
+                        $journal = Invoke-CloudAdapter $adapter Get-CloudLifecycleJournal @($context)
                         return @{ status = 'Probed'; inventory = $(if ($null -eq $journal) { $null } else { $journal.inventory }) }
                     }
-                    finally { Exit-AzureLifecycleLease $context -Confirm:$false }
+                    finally { Invoke-CloudAdapter $adapter Exit-CloudLifecycle @($context) }
                 }
                 if ($action -ceq 'ValidateSources') {
                     foreach ($pair in @(@('descriptor.json', $inventory.descriptorSha256), @('release.json', $inventory.releaseSha256))) {
@@ -108,8 +94,8 @@ try {
             if ($result.ContainsKey('details')) { $details = $result.details }
             if ($env:GITHUB_STEP_SUMMARY) {
                 $summary = "Operation: $Operation; environment: $Environment; instance: $InstanceId; root: $RootId; status: $status.`n"
-                if ($details.ContainsKey('reviewSha256')) { $summary += "Reviewed plan hash: $($details.reviewSha256)`nApply requires a separate dispatch after reviewing the private plan in Blob.`n" }
-                $store = $(if ($aws) { 'the instance prefix of the S3 state bucket' } else { 'the instance Blob container' })
+                $store = Invoke-CloudAdapter $adapter Get-CloudStoreDescription
+                if ($details.ContainsKey('reviewSha256')) { $summary += "Reviewed plan hash: $($details.reviewSha256)`nApply requires a separate dispatch after reviewing the private plan in $store.`n" }
                 $summary += "Application verification: pending. Inventory and private plans remain in $store.`n"
                 Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
             }
@@ -118,6 +104,6 @@ try {
 }
 catch { $status = 'Blocked'; $code = $(if ($_.Exception.Message -cmatch '^lifecycle[.][A-Za-z0-9.]+$') { $_.Exception.Message } else { 'lifecycle.ephemeral.workflowFailed' }) }
 $json = @{ apiVersion = 'hexagon.ec/environment-workflow-result/v1'; status = $status; operation = $Operation; mode = $Mode; rootId = $RootId; applicationVerified = $false; details = $details; code = $code } | ConvertTo-Json -Depth 8
-if (-not ($json | Test-Json -SchemaFile (Join-Path $repository 'contracts/schemas/environment-workflow-result-v1.schema.json') -ErrorAction SilentlyContinue)) { throw 'lifecycle.ephemeral.resultInvalid' }
+if (-not (Test-ContractJson $json environment-workflow-result-v1)) { throw 'lifecycle.ephemeral.resultInvalid' }
 $json
 if ($status -cin @('Blocked', 'Failed')) { exit 1 }; if ($status -ceq 'Unverified') { exit 2 }; exit 0

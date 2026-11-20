@@ -47,7 +47,10 @@ try {
     Assert-Rejected { Verify-Record } 'checksum mismatch'
     $record.artifacts[0].file = '../outside.tar.gz'; Save-Record
     Assert-Rejected { Verify-Record } 'Invalid ComponentBuild'
-    foreach ($unsafe in @('runtime-config.json', 'staticwebapp.config.json', '../escape', '/absolute', 'assets/.env', 'main.js.map')) {
+    # The reserved names include the control files of every web host of the repository.
+    Import-Module (Join-Path $root 'scripts/StaticWebConfiguration.psm1')
+    $reserved = @(Get-StaticWebReservedNames | Where-Object { $_ -cne 'hexagon-deployment.json' })
+    foreach ($unsafe in $reserved + @('../escape', '/absolute', 'assets/.env', 'main.js.map')) {
         Write-Archive $webArchive @{ 'index.html' = (Bytes 'index'); $unsafe = (Bytes 'forbidden') }
         Assert-Rejected { & (Join-Path $root 'scripts/Test-StaticBundle.ps1') -Archive $webArchive } $(if ($unsafe -in @('../escape', '/absolute')) { 'Unsafe static bundle path' } else { 'forbidden' })
     }

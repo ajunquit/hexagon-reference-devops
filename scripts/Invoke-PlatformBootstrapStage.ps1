@@ -18,6 +18,7 @@ $status = 'Blocked'
 $details = @{}
 $checks = @()
 try {
+    Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.Execution.psm1') -Force
     $parsed = Read-PlatformBootstrapDefinition $Definition
@@ -53,7 +54,7 @@ try {
         [IO.Directory]::CreateDirectory($workspacePath) | Out-Null
         if (-not $IsWindows) { [IO.File]::SetUnixFileMode($workspacePath, [IO.UnixFileMode] 'UserRead,UserWrite,UserExecute') }
         $lock = [IO.File]::Open((Join-Path $workspacePath '.execution.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-        $binding = ConvertTo-PlatformBootstrapJson @{
+        $binding = ConvertTo-CanonicalJson @{
             product = $parsed.definition.product; repository = $parsed.definition.automation.repository
             tenant = $parsed.definition.azure.tenantId; subscription = $parsed.definition.azure.subscriptionId
             state = $parsed.definition.state
@@ -96,7 +97,7 @@ $result = @{
     status = $status; readyToApply = ($status -ceq 'Prepared'); applyImplemented = $true
     platformVerified = ($status -ceq 'Verified'); checks = @($checks); details = $details
 }
-$json = ConvertTo-PlatformBootstrapJson $result
+$json = ConvertTo-CanonicalJson $result
 if (-not ($json | Test-Json -SchemaFile (Join-Path (Split-Path -Parent $PSScriptRoot) 'contracts/schemas/platform-bootstrap-execution-v1.schema.json') -ErrorAction SilentlyContinue)) { throw 'Invalid bootstrap execution result.' }
 $json
 if ($status -ceq 'Blocked') { exit 1 }

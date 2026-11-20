@@ -4,11 +4,11 @@ Estado: ciclo manual de infraestructura efímera implementado en 9C; aplicacione
 integral pendientes, con extensión a ambientes persistentes en 9D. El
 [ADR 0012](adr/0012-genesis-y-apocalypse-por-ambiente.md) registra el diseño y el
 [ADR 0017](adr/0017-reservas-efimeras-y-workflows-del-ciclo.md) su conexión por etapas.
-La [guía del ciclo](ciclo-efimero-azure.md) contiene los comandos y alcance operativo actual.
+La guía del ciclo efímero de cada nube contiene sus comandos y su alcance operativo actual.
 
 El primer paso ya incorpora el [motor de inventario, planes y recuperación](motor-ciclo-ambiente.md),
 según el [ADR 0015](adr/0015-motor-de-ciclo-de-ambiente-con-inventario.md). Sus pruebas usan un doble
-del puerto. El adaptador Terraform/Azure, custodia remota y workflows ya están conectados para
+del puerto. El adaptador Terraform de cada nube, la custodia remota y los workflows ya están conectados para
 instancias efímeras, con pruebas locales/protocolo; no acreditan ejecución cloud real.
 
 ## Referencia y estado actual
@@ -29,7 +29,7 @@ CI. Ya incluye `genesis.yml`, `apocalypse.yml` y coordinación manual del adapta
 de contenedores locales no destruye un ambiente cloud. La ruta de fase 9 exigía retirar el ambiente
 efímero; esta decisión concreta también la entrada manual de destrucción.
 
-Se conserva la analogía de `movieops`, adaptada a Container Apps y Static Web Apps, contratos
+Se conserva la analogía de `movieops`, adaptada a los servicios administrados de cada nube, contratos
 inmutables y varios estados Terraform. No se adopta AKS por copiar la referencia.
 
 ## Experiencia de operación prevista
@@ -89,7 +89,7 @@ La cobertura depende de lo implementado, no de que aparezca una opción en el se
 
 Cada etapa genera y aplica su plan revisado con los outputs de las etapas anteriores. No se
 reutiliza un plan obsoleto después de cambiar su estado o inputs. El detalle de activación sigue
-la [referencia de hosting](hosting-azure.md#orden-de-activación).
+la referencia de hosting de cada nube.
 
 ## Orquestación de destrucción
 
@@ -135,7 +135,7 @@ requieren acceso y retención protegidos; no se publican completos en PR ni como
 
 9C implementará primero scripts y pruebas de inventario, selección, orden, planes, fallo parcial y
 verificación de baja; después las entradas manuales Genesis/Apocalypse y la composición efímera
-Azure. La prueba efímera usará la misma lógica de retirada, ejecutada al finalizar incluso tras
+de cada nube. La prueba efímera usará la misma lógica de retirada, ejecutada al finalizar incluso tras
 fallos, con reconciliación posterior si un runner desaparece o se cancela. Su identidad y estado
 deben aislarse de un `dev` persistente: seleccionar `dev` no autoriza borrar otro entorno existente.
 La instancia efímera tendrá un identificador derivado de su ejecución, presente en nombres,

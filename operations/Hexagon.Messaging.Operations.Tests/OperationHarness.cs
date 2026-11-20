@@ -9,24 +9,21 @@ internal sealed class OperationHarness : IDisposable
 
     public OperationHarness() => Directory.CreateDirectory(directory);
 
-    public static OperationTarget Target(string provider = "azure-service-bus") => new()
+    /// <summary>A valid RabbitMQ target; the tests of each cloud replace its provider fields.</summary>
+    public static OperationTarget Target() => new()
     {
         ApiVersion = "hexagon.ec/messaging-operation-target/v1",
         Product = "hexagon-example",
         Environment = "dev",
-        Provider = provider,
+        Provider = "rabbitmq",
         Consumer = "sales-worker",
         EventTypes = ["CustomerCreatedIntegrationEvent"],
         ReplayEnabled = true,
         HasDeadLetter = true,
         MaxBatchSize = 2,
         DelayMilliseconds = 100,
-        Namespace = "sb-example.servicebus.windows.net",
-        Topic = "integration-events",
-        Subscription = "sales-worker",
-        Region = "us-east-1",
-        SourceQueue = provider == "aws-sns-sqs" ? "https://sqs.us-east-1.amazonaws.com/000000000000/sales-worker" : "sales-worker",
-        DeadLetterQueue = provider == "aws-sns-sqs" ? "https://sqs.us-east-1.amazonaws.com/000000000000/sales-worker-dlq" : "sales-worker-dlq",
+        SourceQueue = "sales-worker",
+        DeadLetterQueue = "sales-worker-dlq",
         VirtualHost = "operations",
         Exchange = "integration-events",
     };

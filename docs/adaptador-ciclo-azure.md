@@ -25,7 +25,7 @@ permanece `false`: verificar un root no demuestra que frontend/backend estén op
   heredadas directas y roles adicionales de la identidad de ejecución. No sustituye la auditoría de permisos del bootstrap
   ni comprueba membresías indirectas de grupos en Entra.
 - Los roots admitidos son hosting Azure y Service Bus; rutas y tipos de recursos se fijan en código.
-  AWS/RabbitMQ conservan sus adaptadores separados, pendientes de este ciclo cloud.
+  Las demás nubes y RabbitMQ tienen sus propios adaptadores.
 - Los inputs proceden de los exportadores de hosting/mensajería y contienen bindings públicos y
   referencias a secretos. No introduzcas credenciales en ellos. La detección de claves conocidas
   es un guardrail adicional, no un detector universal de secretos. Planes y estado se tratan como
@@ -170,3 +170,7 @@ Referencias: [lease Blob](https://learn.microsoft.com/en-us/rest/api/storageserv
 [roles del grupo y heredados](https://learn.microsoft.com/en-us/rest/api/authorization/role-assignments/list-for-resource-group?view=rest-authorization-2022-04-01),
 [plan Terraform](https://developer.hashicorp.com/terraform/cli/commands/plan) y
 [formato de estado/plan](https://developer.hashicorp.com/terraform/internals/json-format).
+
+## Inventario de Azure
+
+El motor común aplica las reglas de `AzureEnvironmentRules.psm1`: `AzureHosting` y `AzureServiceBus`, con un resource group por root.

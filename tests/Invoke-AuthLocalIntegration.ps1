@@ -54,12 +54,14 @@ try {
     $messagingFile = Join-Path $backendPath '.hexagon/local-messaging-bindings.json'
     if (Test-Path -LiteralPath (Join-Path $backendPath '.hexagon/messaging-requirements.json')) {
         $text = [IO.File]::ReadAllText($messagingFile)
-        if (-not ($text | Test-Json -SchemaFile (Join-Path $PSScriptRoot '../contracts/schemas/local-messaging-bindings-v1.schema.json') -ErrorAction SilentlyContinue)) { throw 'Start the product local messaging from DevOps before acceptance.' }
+        Import-Module (Join-Path $PSScriptRoot '../scripts/ContractSchemas.psm1')
+        if (-not (Test-ContractJson $text local-messaging-bindings-v1)) { throw 'Start the product local messaging from DevOps before acceptance.' }
         $messaging = $text | ConvertFrom-Json -AsHashtable
         if ($messaging.product -cne $model.product -or -not $messaging.workloads.ContainsKey($api[0].id)) { throw 'Local messaging belongs to a different product.' }
         foreach ($key in $messaging.workloads[$api[0].id].Keys) {
             $value = [string] $messaging.workloads[$api[0].id][$key]
-            if ($key -ceq 'ConnectionStrings__servicebus') {
+            # An emulator connection string (Endpoint=...) must point to loopback and declare the emulator.
+            if ($key -like 'ConnectionStrings__*' -and $value -match '(?i)(?:^|;)\s*Endpoint\s*=') {
                 $bus = [System.Data.Common.DbConnectionStringBuilder]::new(); $bus.set_ConnectionString($value)
                 if (-not $bus.ContainsKey('Endpoint') -or ([Uri] $bus['Endpoint']).Host -cnotin @('localhost','127.0.0.1','::1') -or
                     -not $bus.ContainsKey('UseDevelopmentEmulator') -or [string] $bus['UseDevelopmentEmulator'] -ine 'true') { throw 'Acceptance messaging must use the local emulator.' }

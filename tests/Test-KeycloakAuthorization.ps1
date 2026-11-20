@@ -39,7 +39,7 @@ try {
     }.GetNewClosure() }
     $plan = Get-KeycloakAuthorizationPlan $context
     if ($plan.realmExists -or $observed.Count -ne 2) { throw 'Empty-platform plan is not read-only and bounded.' }
-    $model.authority='https://example.cloudfront.net/auth/realms/hexagon-example'
+    $model.authority='https://cdn.example.test/auth/realms/hexagon-example'
     $observed.Clear()
     $context.http={param($method,$requestPath,$body) $observed.Add($method+' '+$requestPath)
         if($requestPath -ceq '/auth/admin/serverinfo') { return @{status=200;value=@{systemInfo=@{version='26.6.0'}}} }
@@ -57,7 +57,7 @@ try {
     if ($null -ne (Get-HostingAuthorizationBindings $inputs)) { throw 'Legacy input was made to require an authorization job.' }
     $inputs.workloads.api.environment = @{} + $public.environment
     foreach ($key in @('Auth__Authority','Auth__Audience','Auth__ApiScope')) { $inputs.workloads.api.environment.Remove($key) }
-    $inputs.workloads.api.secret_references.Auth__Authorization__ClientSecret = @{secret_arn='arn:aws:secretsmanager:us-east-1:000000000001:secret:auth-fixture'}
+    $inputs.workloads.api.secret_references.Auth__Authorization__ClientSecret = @{secret_uri='https://vault.example.test/secrets/auth-fixture'}
     if ((Get-HostingAuthorizationBindings $inputs).environment.Count -ne 3) { throw 'Public authorization environment differs.' }
     $journal=@{jobs=@{}}
     Assert-Rejected { Assert-AuthorizationTaskOrder $journal $inputs } 'previousTaskRequired'

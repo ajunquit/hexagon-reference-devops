@@ -28,7 +28,7 @@ test('authorization requires Code, S256, state and the exact public callback/cli
   }
 });
 
-// A native Chromium DOM/protocol fixture. These intercepted endpoints are NOT Azure, real OIDC,
+// A native Chromium DOM/protocol fixture. These intercepted endpoints are NOT a cloud, real OIDC,
 // a backend or a broker, and their success is never published as cloud application evidence.
 function fixtureBrowser({ otherStatus = 404, completed = true, subject = config.subjectId, withBearer = true } = {}) {
   const id = '019a6d5b-88f8-7000-8000-000000000001';

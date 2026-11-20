@@ -3,13 +3,15 @@
 Este es el **siguiente paso de preparación de 9C**, previo a conectar Genesis/Apocalypse:
 contrato EnvironmentInventory v1, control de planes, dependencias, checkpoints y recuperación.
 El [ADR 0015](adr/0015-motor-de-ciclo-de-ambiente-con-inventario.md) amplía el diseño del
-[ciclo de ambiente](genesis-y-apocalypse.md). No crea un ambiente Azure ni implementa los workflows.
+[ciclo de ambiente](genesis-y-apocalypse.md). No crea ningún ambiente en la nube ni implementa los workflows.
 
 ## Qué contiene el inventario
 
 El [ejemplo](../examples/environment-inventory.json) es ficticio e inicial: roots Pending, sin
 recursos ni evidencia de ejecución. El [esquema](../contracts/schemas/environment-inventory-v1.schema.json)
-rechaza propiedades desconocidas; un inventario real se guarda protegido fuera de Git.
+rechaza propiedades desconocidas. El destino y las roots de cada nube están en su variante
+(`<nube>-environment-inventory-v1.variant.json`), que `scripts/ContractSchemas.psm1` compone con el
+esquema. Un inventario real se guarda protegido fuera de Git.
 
 | Sección | Función |
 | --- | --- |
@@ -43,20 +45,10 @@ sin duplicados, ciclos ni dependencias ausentes; los componentes web/backend req
 mensajería requiere backend. Si ambos roots existen,
 mensajería depende de hosting. El motor admite dos composiciones, sin mezclarlas en un inventario:
 
-- **Azure:** `AzureHosting` y `AzureServiceBus`, con un resource group por root.
-- **AWS** ([ADR 0025](adr/0025-ciclo-de-ambiente-en-aws.md)): `AwsHosting` y `AwsSnsSqs`, con un
-  target de cuenta, región, rol y bucket de estado, y un **prefijo corto** común a los dos roots. En
-  una instancia efímera, el prefijo es una base de 3 a 12 caracteres más `-` y seis caracteres
-  hexadecimales del SHA-256 de `<producto>/<ambiente>/<instancia>`; en una persistente, solo la base.
-  Ver `examples/environment-inventory-aws.json`.
-
-  Cada recurso se registra como `aws:<cuenta>:<región>:<tipo>:<id>`, con el tipo y el ID de
-  Terraform. El motor rechaza:
-  - una cuenta o región ajenas;
-  - el proveedor OIDC, usuarios y claves IAM;
-  - el bucket de estado y el rol de la reserva;
-  - en los planes, un ARN de otra cuenta o región y unas etiquetas `hexagon:*` que no sean de la
-    instancia.
+Las reglas de cada nube están en su módulo `<Nube>EnvironmentRules.psm1`
+([separación por nube](separacion-por-nube.md)): adaptadores de los roots, ámbito de cada root,
+forma de los identificadores de recursos, tipos prohibidos y alcance del plan. La guía del ciclo de
+cada nube las describe.
 
 RabbitMQ sigue sin coordinación del ciclo.
 
@@ -101,7 +93,7 @@ solo se admite en instancias efímeras fuera de prod; cualquier otro caso usa Ba
 ## Puerto de integración obligatorio
 
 Las operaciones ejecutables de la biblioteca requieren un scriptblock de código confiable,
-inyectado por el [adaptador explícito Terraform/Azure](adaptador-ciclo-azure.md) y **no leído del
+inyectado por el adaptador Terraform de la nube y **no leído del
 JSON ni expuesto como parámetro de la CLI**. El motor no elige uno por defecto. El doble de tests
 no se debe usar en workflows reales.
 
@@ -148,12 +140,10 @@ Test-EnvironmentLifecycle.ps1 cubre selección, claves efímeras/persistentes, d
 hashes/caducidad, confirmación, preflight, checkpoint duradero, fallo parcial, recuperación, ausencia,
 estado inaccesible y evidencia de respaldo. Utiliza un doble del puerto, sin cambios cloud.
 
-El [adaptador Terraform/Azure](adaptador-ciclo-azure.md) incorpora almacenamiento remoto, snapshot
-recuperable, lease/CAS y observación, con pruebas de protocolo sin cambios cloud. Las
-[reservas efímeras y Genesis/Apocalypse](ciclo-efimero-azure.md) conectan los ámbitos de instancia y
-las etapas manuales con diagnóstico real previo a ejecutar. Su adopción necesita el bootstrap
-aislado preparado en el producto. Faltan artefactos, migraciones, SPA, salud, recorrido integral
-y limpieza automática incluso tras fallos, además de comprobarlo en Azure. 9C sigue abierta.
+El adaptador Terraform de cada nube incorpora almacenamiento remoto, snapshot recuperable, lease/CAS
+y observación, con pruebas de protocolo sin cambios en la nube. Las reservas efímeras y
+Genesis/Apocalypse conectan los ámbitos de instancia y las etapas manuales con diagnóstico real
+previo a ejecutar.
 
 Referencias: [JSON Terraform](https://developer.hashicorp.com/terraform/internals/json-format),
 [planes guardados](https://developer.hashicorp.com/terraform/cli/commands/plan) y

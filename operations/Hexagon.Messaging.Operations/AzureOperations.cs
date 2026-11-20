@@ -3,8 +3,24 @@ using Azure.Messaging.ServiceBus;
 
 namespace Hexagon.Messaging.Operations;
 
-internal static class AzureOperations
+internal sealed class AzureOperations : IMessagingProvider
 {
+    public string Name => "azure-service-bus";
+
+    public bool Fanout => true;
+
+    public void Validate(OperationTarget target)
+    {
+        if (target.Namespace is null || !System.Text.RegularExpressions.Regex.IsMatch(target.Namespace, "^[a-zA-Z0-9-]+[.]servicebus[.]windows[.]net$") ||
+            !OperationTarget.EntityName(target.Topic) || !OperationTarget.EntityName(target.Subscription) || !target.HasDeadLetter)
+        {
+            throw new InvalidOperationException("Invalid Azure target.");
+        }
+    }
+
+    Task IMessagingProvider.RunAsync(OperationTarget target, OperationRequest request, CancellationToken cancellationToken) =>
+        RunAsync(target, request, cancellationToken);
+
     public static async Task RunAsync(OperationTarget target, OperationRequest request, CancellationToken cancellationToken)
     {
         var connection = System.Environment.GetEnvironmentVariable("HEXAGON_OPERATIONS_CONNECTION_STRING");

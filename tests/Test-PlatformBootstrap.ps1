@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $root 'scripts/CanonicalJson.psm1') -Force
 Import-Module (Join-Path $root 'scripts/PlatformBootstrap.psm1') -Force
 $module = Get-Module PlatformBootstrap
 $example = Join-Path $root 'examples/platform-bootstrap.yaml'
@@ -66,9 +67,9 @@ try {
         foreach ($dependency in $operation.dependsOn) { Assert-True ($seen.Contains($dependency)) 'Dependencies must precede their consumer.' }
         Assert-True ($seen.Add($operation.id)) 'Duplicate operation id.'
     }
-    $offlineJson = ConvertTo-PlatformBootstrapJson $offline
+    $offlineJson = ConvertTo-CanonicalJson $offline
     Assert-True ($offlineJson | Test-Json -SchemaFile (Join-Path $root 'contracts/schemas/platform-bootstrap-result-v1.schema.json')) 'Result schema rejected an offline plan.'
-    Assert-True ($offlineJson -ceq (ConvertTo-PlatformBootstrapJson (New-PlatformBootstrapPlan -Parsed $parsed))) 'Plan serialization is not deterministic.'
+    Assert-True ($offlineJson -ceq (ConvertTo-CanonicalJson (New-PlatformBootstrapPlan -Parsed $parsed))) 'Plan serialization is not deterministic.'
     $devOnly = Read-PlatformBootstrapDocument -Path (Write-Yaml ($original -replace '(?ms)^  staging:\r?\n.*\z', ''))
     $devPlan = New-PlatformBootstrapPlan -Parsed $devOnly
     Assert-True ((@(Get-BootstrapEnvironments $devOnly.definition) -join ',') -ceq 'dev') 'A dev-only definition selected other environments.'

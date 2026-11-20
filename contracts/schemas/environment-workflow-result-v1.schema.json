@@ -2,106 +2,26 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "status",
-    "applicationVerified",
-    "operation",
-    "mode",
-    "rootId",
-    "details",
-    "code"
-  ],
+  "required": ["apiVersion", "status", "applicationVerified", "operation", "mode", "rootId", "details", "code"],
   "properties": {
-    "apiVersion": {
-      "const": "hexagon.ec/environment-workflow-result/v1"
-    },
+    "apiVersion": { "const": "hexagon.ec/environment-workflow-result/v1" },
     "status": {
-      "enum": [
-        "Validated",
-        "Prepared",
-        "Verified",
-        "Destroyed",
-        "Failed",
-        "Quiesced",
-        "Blocked",
-        "Unverified"
-      ]
+      "enum": ["Validated", "Prepared", "Verified", "Destroyed", "Failed", "Quiesced", "Blocked", "Unverified"]
     },
-    "applicationVerified": {
-      "const": false
-    },
-    "operation": {
-      "enum": [
-        "Create",
-        "Destroy"
-      ]
-    },
-    "mode": {
-      "enum": [
-        "Validate",
-        "Prepare",
-        "Apply",
-        "Sync",
-        "Quiesce"
-      ]
-    },
-    "rootId": {
-      "enum": [
-        "hosting",
-        "messaging"
-      ]
-    },
-    "details": {
+    "applicationVerified": { "const": false },
+    "operation": { "enum": ["Create", "Destroy"] },
+    "mode": { "enum": ["Validate", "Prepare", "Apply", "Sync", "Quiesce"] },
+    "rootId": { "enum": ["hosting", "messaging"] },
+    "details": { "$ref": "#/$defs/cloudDetails" },
+    "code": { "type": ["string", "null"], "pattern": "^lifecycle[.][A-Za-z0-9.]+$" }
+  },
+  "$defs": {
+    "cloudDetails": {
       "type": "object",
-      "additionalProperties": false,
       "properties": {
-        "reviewSha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "clientId": {
-          "type": "string",
-          "pattern": "^[0-9a-f-]{36}$"
-        },
-        "tenantId": {
-          "type": "string",
-          "pattern": "^[0-9a-f-]{36}$"
-        },
-        "subscriptionId": {
-          "type": "string",
-          "pattern": "^[0-9a-f-]{36}$"
-        },
-        "githubEnvironment": {
-          "type": "string",
-          "pattern": "^(dev|staging)-run-[1-9][0-9]*-[1-9][0-9]*$"
-        },
-        "provider": {
-          "enum": [
-            "azure",
-            "aws"
-          ]
-        },
-        "accountId": {
-          "type": "string",
-          "pattern": "^[0-9]{12}$"
-        },
-        "region": {
-          "type": "string",
-          "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$"
-        },
-        "roleArn": {
-          "type": "string",
-          "pattern": "^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_-]{1,64}$"
-        }
+        "reviewSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "githubEnvironment": { "type": "string", "pattern": "^(dev|staging)-run-[1-9][0-9]*-[1-9][0-9]*$" }
       }
-    },
-    "code": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "pattern": "^lifecycle[.][A-Za-z0-9.]+$"
     }
   }
 }

@@ -39,15 +39,17 @@
         "pattern": "^hexagon-[a-z][a-z0-9-]*$"
       },
       "additionalProperties": {
-        "type": "object",
-        "minProperties": 1,
-        "propertyNames": {
-          "pattern": "^(?:ConnectionStrings__servicebus|AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION)|Messaging__(?:AzureServiceBus|Aws|RabbitMq)__[A-Za-z0-9_-]+(?:__[A-Za-z0-9_-]+)*)$"
-        },
-        "additionalProperties": {
-          "type": "string",
-          "minLength": 1
-        }
+        "$ref": "#/$defs/cloudWorkloadSettings"
+      }
+    }
+  },
+  "$defs": {
+    "cloudWorkloadSettings": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
       }
     }
   }

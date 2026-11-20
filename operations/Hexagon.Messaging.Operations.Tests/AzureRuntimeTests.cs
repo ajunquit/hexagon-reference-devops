@@ -34,7 +34,7 @@ public sealed class AzureRuntimeTests
         Assert.NotNull(await quarantine.PeekMessageAsync(fromSequenceNumber: 0));
         using var harness = new OperationHarness();
         harness.SetEnvironment("HEXAGON_OPERATIONS_CONNECTION_STRING", container.GetConnectionString());
-        var target = OperationHarness.Target();
+        var target = AzureOperationTests.Target();
         var inspection = await harness.RunAsync(target, "inspect");
         Assert.Equal(0, inspection.ExitCode);
         Assert.NotNull(await quarantine.PeekMessageAsync(fromSequenceNumber: 0));

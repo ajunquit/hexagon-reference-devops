@@ -11,7 +11,8 @@ Import-Module (Join-Path $repository 'scripts/EnvironmentWorkflow.psm1') -Force
 Import-Module (Join-Path $repository 'scripts/EphemeralEnvironment.psm1')
 Import-Module (Join-Path $repository 'scripts/EnvironmentLifecycle.psm1')
 Import-Module (Join-Path $repository 'scripts/EnvironmentSnapshot.psm1')
-Import-Module (Join-Path $repository 'scripts/PlatformBootstrap.psm1')
+Import-Module (Join-Path $repository 'scripts/CanonicalJson.psm1')
+Import-Module (Join-Path $repository 'scripts/AzureEphemeralEnvironment.psm1')
 Import-Module (Join-Path $repository 'scripts/TerraformAzureLifecycle.psm1')
 $parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $temporary = Join-Path $parent "hexagon-workflow-tests-$([guid]::NewGuid().ToString('N'))"
@@ -23,8 +24,8 @@ function Assert-Rejected([scriptblock] $Action, [string] $Code) {
     catch { Assert-True ($_.Exception.Message -like "*$Code*") "Unexpected rejection: $($_.Exception.Message)"; return }
     throw "Expected rejection: $Code"
 }
-function Copy-Value([object] $Value) { return (ConvertTo-PlatformBootstrapJson $Value) | ConvertFrom-Json -AsHashtable -Depth 64 }
-function Write-Json([string] $Path, [object] $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-PlatformBootstrapJson $Value) + "`n") }
+function Copy-Value([object] $Value) { return (ConvertTo-CanonicalJson $Value) | ConvertFrom-Json -AsHashtable -Depth 64 }
+function Write-Json([string] $Path, [object] $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-CanonicalJson $Value) + "`n") }
 $definition = Read-EphemeralEnvironment (Join-Path $repository 'examples/ephemeral-environment.json')
 $definition.expiresAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
 $module = Get-Module EphemeralEnvironment
@@ -55,18 +56,18 @@ try {
     Assert-Rejected { Resolve-EphemeralWorkspacePath $temporary } 'workspaceOutsideArtifacts'
     $storage = @{ id = "/subscriptions/$($definition.inventory.target.subscriptionId)/resourceGroups/$($definition.inventory.target.stateResourceGroup)/providers/Microsoft.Storage/storageAccounts/$($definition.inventory.target.storageAccount)"; allowSharedKeyAccess = $false; allowBlobPublicAccess = $false; minimumTlsVersion = 'TLS1_2'; encryption = @{ requireInfrastructureEncryption = $true } }
     $properties = @{ isVersioningEnabled = $true; deleteRetentionPolicy = @{ enabled = $true; days = 30 }; containerDeleteRetentionPolicy = @{ enabled = $true; days = 30 } }
-    Assert-EphemeralBootstrapStorage $definition $storage $properties
+    Assert-AzureEphemeralBootstrapStorage $definition $storage $properties
     $badStorage = Copy-Value $storage; $badStorage.allowSharedKeyAccess = $true
-    Assert-Rejected { Assert-EphemeralBootstrapStorage $definition $badStorage $properties } 'storageNotProtected'
+    Assert-Rejected { Assert-AzureEphemeralBootstrapStorage $definition $badStorage $properties } 'storageNotProtected'
     $badProperties = Copy-Value $properties; $badProperties.isVersioningEnabled = $false
-    Assert-Rejected { Assert-EphemeralBootstrapStorage $definition $storage $badProperties } 'storageNotProtected'
+    Assert-Rejected { Assert-AzureEphemeralBootstrapStorage $definition $storage $badProperties } 'storageNotProtected'
     $unused = Join-Path $repository "artifacts/workflow-whatif-$([guid]::NewGuid().ToString('N'))"
     New-EphemeralWorkspace $unused -WhatIf | Out-Null
     Assert-True (-not (Test-Path -LiteralPath $unused)) 'Workspace WhatIf created a directory.'
 
     $plan = @{ format_version = '1.2'; complete = $true; errored = $false; resource_changes = @(@{ mode = 'managed'; type = 'azurerm_user_assigned_identity'; change = @{ actions = @('create') } }) }
-    Assert-EphemeralReservationPlan $plan
-    Assert-EphemeralReservationPlan @{ format_version = '1.2'; complete = $true; errored = $false }
+    Assert-AzureEphemeralReservationPlan $plan
+    Assert-AzureEphemeralReservationPlan @{ format_version = '1.2'; complete = $true; errored = $false }
     Assert-True ($true) 'A converged second reservation must be supported.'
     foreach ($mutation in @(
         { param($p) $p.resource_changes[0].change.actions = @('delete', 'create') },
@@ -78,7 +79,7 @@ try {
         { param($p) $p.resource_changes[0].type = 'azurerm_virtual_machine' }
     )) {
         $bad = Copy-Value $plan; & $mutation $bad
-        Assert-Rejected { Assert-EphemeralReservationPlan $bad } 'reservationChangeForbidden'
+        Assert-Rejected { Assert-AzureEphemeralReservationPlan $bad } 'reservationChangeForbidden'
     }
     $names = @('main.tf', 'providers.tf', 'variables.tf', 'outputs.tf', 'versions.tf', '.terraform.lock.hcl', 'terraform.rc', 'backend.json', 'inputs.tfvars.json', 'reservation.tfplan', 'reservation.json')
     $hashes = @{}
@@ -149,9 +150,9 @@ try {
 
     $isolation = @{ status = 403; calls = [Collections.Generic.List[string]]::new() }
     $reader = { param($uri, $storage) $isolation.calls.Add($uri); if ($storage -and $uri -match '/tfstate-run-12345-1-dev[?]') { return 200 }; return $isolation.status }.GetNewClosure()
-    $result = Test-EphemeralIsolation $definition $reader
+    $result = Test-AzureEphemeralIsolation $definition $reader
     Assert-True ($result.status -ceq 'Verified' -and $isolation.calls.Count -eq $definition.protectedResourceGroups.Count + 5) 'Isolation did not probe protected groups and all persistent/bootstrap containers.'
-    foreach ($status in @(200, 401, 404, 500)) { $isolation.status = $status; Assert-Rejected { Test-EphemeralIsolation $definition $reader } 'isolationNotVerified' }
+    foreach ($status in @(200, 401, 404, 500)) { $isolation.status = $status; Assert-Rejected { Test-AzureEphemeralIsolation $definition $reader } 'isolationNotVerified' }
 
     # GitHub API responses are explicit protocol fixtures; mutations must be followed by readback.
     $github = @{ calls = [Collections.Generic.List[string]]::new(); branches = @(); variables = @(); configured = $false; drift = $false }
@@ -270,7 +271,7 @@ try {
     if (-not ('Hexagon.LifecycleTests.LifecycleHttpHandler' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'LifecycleHttpHandler.cs') }
     $handler = [Hexagon.LifecycleTests.LifecycleHttpHandler]::new()
     $key = "/$($definition.inventory.target.container)/$($definition.inventory.product)/dev/run-12345-1/inventory.json"
-    $handler.Blobs[$key] = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $definition.inventory))
+    $handler.Blobs[$key] = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $definition.inventory))
     $handler.Etags[$key] = '"workflow-fixture"'
     $runspace = [PowerShell]::Create()
     try {

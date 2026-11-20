@@ -9,12 +9,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'MessagingOperations.psm1') -Force
 $operations = Get-Content -Raw -LiteralPath $Policy | ConvertFrom-Json
 $topology = Get-Content -Raw -LiteralPath $TopologyPolicy | ConvertFrom-Json
-$validator = switch ($operations.provider) {
-    'azure-service-bus' { 'Test-AzureServiceBusPolicy.ps1' }
-    'aws-sns-sqs' { 'Test-AwsSnsSqsPolicy.ps1' }
-    'rabbitmq' { 'Test-RabbitMqPolicy.ps1' }
-    default { throw 'Unsupported operations provider.' }
-}
+$validator = "Test-$(Invoke-OperationsProvider (Get-OperationsProviderModule $operations.provider) Get-OperationsContracts)Policy.ps1"
 & (Join-Path $PSScriptRoot $validator) -Policy $TopologyPolicy
 Assert-OperationsPolicy -Operations $operations -Topology $topology
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

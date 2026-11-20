@@ -1,0 +1,42 @@
+name: Azure session
+description: >-
+  Checks that the GitHub environment is bound to the validated Azure target, then signs in with its
+  isolated identity through OIDC. Genesis, Apocalypse and Delivery call it through cloud-session.
+inputs:
+  target:
+    description: Public target details returned by the validation of the instance, as JSON
+    required: true
+  bindings:
+    description: Variables of the GitHub environment, as JSON
+    required: true
+  stage:
+    description: Stage of the run, for the tools that only some stages need
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Check exact environment bindings before authentication
+      shell: pwsh
+      env:
+        TARGET_JSON: ${{ inputs.target }}
+        BINDINGS_JSON: ${{ inputs.bindings }}
+      run: |
+        $target = $env:TARGET_JSON | ConvertFrom-Json -AsHashtable
+        $bindings = $env:BINDINGS_JSON | ConvertFrom-Json -AsHashtable
+        if ($target.provider -cne 'azure' -or $bindings.AZURE_CLIENT_ID -cne $target.clientId -or $bindings.AZURE_TENANT_ID -cne $target.tenantId -or $bindings.AZURE_SUBSCRIPTION_ID -cne $target.subscriptionId) { throw 'Environment binding drift.' }
+        foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID')) {
+          if ($bindings[$name] -cnotmatch '^[0-9a-fA-F-]{36}$') { throw 'Environment binding drift.' }
+          "$name=$($bindings[$name])" >> $env:GITHUB_ENV
+        }
+    - name: Authenticate with the isolated instance identity
+      uses: Azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906
+      with:
+        client-id: ${{ fromJSON(inputs.target).clientId }}
+        tenant-id: ${{ fromJSON(inputs.target).tenantId }}
+        subscription-id: ${{ fromJSON(inputs.target).subscriptionId }}
+        audience: api://AzureADTokenExchange
+    - name: Install the checksum-pinned static content client
+      if: inputs.stage == 'PublishWeb'
+      shell: pwsh
+      run: ./scripts/Install-StaticWebClient.ps1

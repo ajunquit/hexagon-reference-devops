@@ -1,5 +1,31 @@
 Set-StrictMode -Version Latest
 
+# The operations of each messaging provider (docs/separacion-por-nube.md): a module named
+# <Provider>OperationsPolicy.psm1 next to this one declares its logical provider and implements the
+# Operations* functions inside it. The modules export nothing, so the clouds of a template never collide.
+$script:providers = $null
+
+function Get-OperationsProviderModules {
+    if ($null -eq $script:providers) {
+        $script:providers = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*OperationsPolicy.psm1' -File | Sort-Object Name |
+            ForEach-Object { Import-Module $_.FullName -PassThru -DisableNameChecking })
+    }
+    return $script:providers
+}
+
+# The logical names of the messaging providers of this repository.
+function Get-OperationsProviders { return [string[]] @(Get-OperationsProviderModules | ForEach-Object { & $_ { Get-OperationsProvider } }) }
+
+function Get-OperationsProviderModule([string] $Provider) {
+    $matching = @(Get-OperationsProviderModules | Where-Object { (& $_ { Get-OperationsProvider }) -ceq $Provider })
+    if ($matching.Count -ne 1) { throw 'Unsupported operations provider.' }
+    return $matching[0]
+}
+
+function Invoke-OperationsProvider([Management.Automation.PSModuleInfo] $Module, [string] $Name, [object[]] $Arguments = @()) {
+    return & $Module { param($command, $values) & $command @values } $Name $Arguments
+}
+
 function Assert-OperationsPolicy {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Operations, [Parameter(Mandatory)] $Topology)
@@ -8,12 +34,8 @@ function Assert-OperationsPolicy {
     if (-not (($Operations | ConvertTo-Json -Depth 30) | Test-Json -SchemaFile $schema -ErrorAction SilentlyContinue)) {
         throw 'Invalid MessagingOperationsPolicy v1.'
     }
-    $expectedKind = switch ($Operations.provider) {
-        'azure-service-bus' { 'AzureServiceBusPolicy' }
-        'aws-sns-sqs' { 'AwsSnsSqsPolicy' }
-        'rabbitmq' { 'RabbitMqPolicy' }
-    }
-    if ($Topology.kind -cne $expectedKind -or $Operations.product -cne $Topology.product -or
+    $provider = Get-OperationsProviderModule $Operations.provider
+    if ($Topology.kind -cne (Invoke-OperationsProvider $provider Get-OperationsTopologyKind) -or $Operations.product -cne $Topology.product -or
         $Operations.environment -cne $Topology.environment) {
         throw 'Operations and topology must agree on product, environment and provider.'
     }
@@ -27,42 +49,13 @@ function Assert-OperationsPolicy {
     if (($actual -join ',') -cne ($operatorKeys -join ',')) { throw 'Every consumer requires an operator identity.' }
     $identities = @($Operations.operatorIdentities.PSObject.Properties.Value)
     if (@($identities | Select-Object -Unique).Count -ne $identities.Count) { throw 'Operator identities must be distinct per consumer.' }
-    $workloads = switch ($Operations.provider) {
-        'azure-service-bus' { @($Topology.workloadPrincipalIds.PSObject.Properties.Value) }
-        'aws-sns-sqs' { @($Topology.workloadRoleNames.PSObject.Properties.Value) }
-        'rabbitmq' { @($Topology.workloadUserNames.PSObject.Properties.Value) }
-    }
+    $workloads = @(Invoke-OperationsProvider $provider Get-OperationsWorkloadIdentities @(, $Topology))
     if (@($identities | Where-Object { $_ -in $workloads }).Count -gt 0) { throw 'Operator identities must not be application workload identities.' }
-    if ($Operations.provider -ceq 'azure-service-bus') {
-        foreach ($identity in $identities) {
-            $principal = [guid]::Empty
-            if (-not [guid]::TryParseExact($identity, 'D', [ref] $principal) -or $principal -eq [guid]::Empty) {
-                throw 'Azure operator identities must be principal UUIDs.'
-            }
-        }
-    }
-    if ($Operations.provider -ceq 'rabbitmq') {
-        if ($Operations.notificationTargets.Count -ne 0) {
-            throw 'RabbitMQ routes notifications through Alertmanager, not cloud notification targets.'
-        }
-    }
-    else {
-        if ($Operations.notificationTargets.Count -eq 0) { throw 'Cloud alerts require notification targets.' }
-        foreach ($target in $Operations.notificationTargets) {
-            $pattern = if ($Operations.provider -ceq 'azure-service-bus') {
-                '^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/[A-Za-z0-9._()-]+/providers/Microsoft.Insights/actionGroups/[A-Za-z0-9._()-]+$'
-            }
-            else { '^arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+$' }
-            if ($target -cnotmatch $pattern) { throw 'Invalid notification target for this provider.' }
-        }
-    }
+    Invoke-OperationsProvider $provider Assert-OperationsIdentities @(, $identities)
+    Invoke-OperationsProvider $provider Assert-OperationsNotifications @(, $Operations)
     foreach ($consumer in $Operations.consumers) {
         $physical = @($Topology.consumers | Where-Object id -CEQ $consumer.id)[0]
-        $hasDlq = switch ($Operations.provider) {
-            'azure-service-bus' { $true }
-            'aws-sns-sqs' { [bool] $physical.redrive.enabled }
-            'rabbitmq' { [bool] $physical.deadLetter.enabled }
-        }
+        $hasDlq = [bool] (Invoke-OperationsProvider $provider Test-OperationsDeadLetter @(, $physical))
         if (-not $hasDlq -and ($null -ne $consumer.deadLetterThreshold -or
             $consumer.quarantineReviewHours -ne 0 -or $consumer.replay.enabled)) {
             throw "Consumer '$($consumer.id)' has no DLQ; quarantine, DLQ alerts and replay must be disabled."
@@ -70,19 +63,7 @@ function Assert-OperationsPolicy {
         if ($hasDlq -and ($null -eq $consumer.deadLetterThreshold -or $consumer.quarantineReviewHours -lt 1)) {
             throw "Consumer '$($consumer.id)' requires a DLQ threshold and a quarantine review deadline."
         }
-        if ($Operations.provider -cne 'aws-sns-sqs' -and $null -ne $consumer.oldestMessageAgeSeconds) {
-            throw 'Only AWS exposes the supported per-queue oldest-message-age metric.'
-        }
-        if ($Operations.provider -ceq 'aws-sns-sqs') {
-            if ($null -eq $consumer.oldestMessageAgeSeconds -or
-                $consumer.oldestMessageAgeSeconds -ge $physical.messageRetentionSeconds) {
-                throw 'AWS oldest-message-age threshold must precede source retention.'
-            }
-            if ($hasDlq -and ($consumer.quarantineReviewHours * 3600) -ge
-                ($physical.redrive.deadLetterMessageRetentionSeconds - $physical.messageRetentionSeconds)) {
-                throw 'Quarantine review must precede the worst-case remaining SQS DLQ retention.'
-            }
-        }
+        Invoke-OperationsProvider $provider Assert-OperationsConsumer @($consumer, $physical, $hasDlq)
     }
 }
 
@@ -127,4 +108,4 @@ function ConvertTo-RabbitMqAlertRules {
     return [ordered] @{ groups = @([ordered] @{ name = "$($Operations.product)-$($Operations.environment)-messaging"; rules = $rules }) }
 }
 
-Export-ModuleMember -Function Assert-OperationsPolicy, ConvertTo-OperationsTerraformInput, ConvertTo-RabbitMqAlertRules
+Export-ModuleMember -Function Assert-OperationsPolicy, ConvertTo-OperationsTerraformInput, ConvertTo-RabbitMqAlertRules, Get-OperationsProviderModule, Get-OperationsProviders, Invoke-OperationsProvider

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Narrows the cloud definitions of application-delivery-journal-v1.schema.json for Azure; scripts/ContractSchemas.psm1 composes them.",
+  "$defs": {
+    "cloudImage": { "pattern": "^[a-z0-9]{5,50}[.]azurecr[.]io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$" },
+    "cloudJobId": {
+      "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[A-Za-z0-9._-]+/providers/Microsoft[.]App/jobs/[a-z0-9-]+$"
+    }
+  }
+}

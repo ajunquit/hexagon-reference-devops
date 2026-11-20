@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Narrows the cloud definitions of environment-inventory-v1.schema.json for Azure; scripts/ContractSchemas.psm1 composes them.",
+  "$defs": {
+    "cloudTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenantId", "subscriptionId", "clientId", "stateResourceGroup", "storageAccount", "container"],
+      "properties": {
+        "tenantId": { "$ref": "#/$defs/uuid" },
+        "subscriptionId": { "$ref": "#/$defs/uuid" },
+        "clientId": { "$ref": "#/$defs/uuid" },
+        "stateResourceGroup": { "type": "string", "pattern": "^rg-[a-z0-9-]{1,76}$" },
+        "storageAccount": { "type": "string", "pattern": "^[a-z0-9]{3,24}$" },
+        "container": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" }
+      }
+    },
+    "cloudRoot": {
+      "properties": {
+        "adapter": { "enum": ["AzureHosting", "AzureServiceBus"] },
+        "resources": {
+          "items": {
+            "properties": {
+              "id": { "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/[^ ]+$" },
+              "type": { "pattern": "^azurerm_[a-z0-9_]+$" }
+            }
+          }
+        }
+      },
+      "required": ["resourceGroup"],
+      "not": { "required": ["namePrefix"] }
+    }
+  }
+}

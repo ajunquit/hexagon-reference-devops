@@ -10,6 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1') -Force
 $parsed = Read-PlatformBootstrapDefinition $Definition
 $settings = $parsed.definition

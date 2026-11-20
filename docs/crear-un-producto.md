@@ -97,20 +97,10 @@ El manifiesto backend decide el proveedor. DevOps añade en el mismo ambiente un
 - `aws-sns-sqs-policy.json` si declara `aws-sns-sqs`;
 - `rabbitmq-policy.json` si declara `rabbitmq`.
 
-Después materializa entradas para el root correspondiente. Por ejemplo, para AWS:
-
-```powershell
-pwsh ./scripts/Export-AwsSnsSqsTerraformInputs.ps1 `
-  -Descriptor products/hexagon-hr/environments/dev/descriptor.json `
-  -Policy products/hexagon-hr/environments/dev/aws-sns-sqs-policy.json `
-  -Output terraform/environments/dev/aws/aws-sns-sqs.auto.tfvars.json
-```
-
-La política física sí se versiona; el archivo `*.auto.tfvars.json` generado no. Los principal IDs
-de Azure, los role names de AWS y los user names de RabbitMQ no son secretos, pero las credenciales
-nunca entran al repositorio.
-
-RabbitMQ se materializa con el script y root equivalentes:
+Después materializa entradas para el root correspondiente con `Export-<Proveedor>TerraformInputs.ps1`.
+La política física sí se versiona; el archivo `*.auto.tfvars.json` generado no. Las identidades de
+workload de la política (IDs de principal, nombres de rol o de usuario) no son secretos, pero las
+credenciales nunca entran al repositorio. Por ejemplo, con RabbitMQ:
 
 ```powershell
 pwsh ./scripts/Export-RabbitMqTerraformInputs.ps1 `
@@ -133,7 +123,8 @@ pwsh ./scripts/Start-LocalMessaging.ps1 `
   -Policy products/hexagon-hr/environments/dev/rabbitmq-policy.json
 ```
 
-Para Azure añade `-AcceptLicense`; para AWS o RabbitMQ no. Luego ejecuta `aspire run` en el backend.
+Si el emulador del proveedor exige aceptar su licencia, añade `-AcceptLicense`. Luego ejecuta
+`aspire run` en el backend.
 La guía completa está en [`local/README.md`](../local/README.md).
 
 ## 5. Promover a otros ambientes
@@ -169,13 +160,12 @@ primero `.config/product.json` y el ejemplo; usa sus comandos, planes revisados 
 operador. La plantilla no aplica infraestructura automáticamente al crear el repositorio.
 
 - clúster RabbitMQ compartido;
-- Kubernetes y las referencias de hosting ajenas a Azure;
+- Kubernetes;
 - pipelines de entrega Genesis/Apocalypse y promoción; el diagnóstico federado ya está implementado.
 
-Azure Service Bus, AWS SNS/SQS y RabbitMQ ya tienen módulos y políticas; la instancia del producto
+Cada proveedor de mensajería del repositorio ya tiene módulo y política; la instancia del producto
 todavía debe dar sus valores reales e identidades. Ninguna capacidad se crea desde el runtime de la
 aplicación.
 
-La fase 9A añade la [referencia de hosting Azure](hosting-azure.md): Container Apps, PostgreSQL,
-Static Web Apps, dominio administrado y Log Analytics, junto a contratos y artefactos inmutables.
+La fase 9A añade la referencia de hosting de cada nube, junto a contratos y artefactos inmutables.
 9B añade CI y artefactos verificables. El despliegue cloud acreditado permanece en 9C.

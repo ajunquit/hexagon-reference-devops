@@ -5,14 +5,6 @@ namespace Hexagon.Database.Bootstrap;
 
 internal static class KeycloakDatabaseBootstrapper
 {
-    public static async Task PrepareAsync(NpgsqlConnection database, BootstrapSettings common,
-        KeycloakDatabaseSettings settings, string password, CancellationToken cancellationToken)
-    {
-        // The role is parsed again at the mutation boundary; credentials never enter the public JSON.
-        settings = KeycloakDatabaseSettings.Parse(System.Text.Json.JsonSerializer.Serialize(settings), common);
-        await PrepareAsync(database, common.Database, settings.Role, password, cancellationToken);
-    }
-
     /// <summary>Creates or keeps the identity role and its schema. The role must already be validated by the caller.</summary>
     public static async Task PrepareAsync(NpgsqlConnection database, string databaseName, string identityRole, string password,
         CancellationToken cancellationToken)

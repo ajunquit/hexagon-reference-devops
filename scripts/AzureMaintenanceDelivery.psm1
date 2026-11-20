@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AzureEnvironmentStore.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 
 function Get-DeliveryAzureObject([hashtable] $Context, [string] $Id) {
     if ($Id -match '[?#%\\\s]|/[.][.]?(?:/|$)') { throw 'lifecycle.delivery.resourceIdInvalid' }
@@ -59,7 +59,7 @@ function Assert-DeliveryJobTemplate([hashtable] $Template, [hashtable] $Expected
     $environment = @{} + $Expected.environment
     if ($AttemptId) { $environment['HEXAGON_DELIVERY_ATTEMPT'] = $AttemptId }
     $desired = @{} + $Expected; $desired.environment = $environment
-    if ((ConvertTo-PlatformBootstrapJson $actual) -cne (ConvertTo-PlatformBootstrapJson $desired)) { throw 'lifecycle.delivery.jobTemplateChanged' }
+    if ((ConvertTo-CanonicalJson $actual) -cne (ConvertTo-CanonicalJson $desired)) { throw 'lifecycle.delivery.jobTemplateChanged' }
 }
 
 function Invoke-AzureDeliveryMaintenance {
@@ -72,17 +72,17 @@ function Invoke-AzureDeliveryMaintenance {
     if ($job.id -ine $JobId -or $job.properties.configuration.triggerType -cne 'Manual' -or $job.properties.configuration.replicaRetryLimit -ne 0 -or
         $job.properties.configuration.replicaTimeout -ne 1800) { throw 'lifecycle.delivery.jobConfigurationChanged' }
     Assert-DeliveryJobTemplate $job.properties.template $Expected ''
-    $hash = Get-LifecycleBytesHash ([Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $Expected)))
+    $hash = Get-LifecycleBytesHash ([Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $Expected)))
     if ($null -ne $Record -and ($Record.jobId -ine $JobId -or $Record.templateSha256 -cne $hash)) { throw 'lifecycle.delivery.jobEvidenceStale' }
     if ($null -ne $Record -and $Record.status -ceq 'Failed') { throw 'lifecycle.delivery.failedExecutionRequiresInvestigation' }
     if ($null -eq $Record) {
         $Record = @{ jobId = $JobId; attemptId = [guid]::NewGuid().ToString(); templateSha256 = $hash; executionId = $null; status = 'Starting' }
         # Durable intent precedes the non-idempotent POST. Recovery only adopts this exact marker.
         & $Persist $Record | Out-Null
-        $template = (ConvertTo-PlatformBootstrapJson $job.properties.template) | ConvertFrom-Json -AsHashtable -Depth 32
+        $template = (ConvertTo-CanonicalJson $job.properties.template) | ConvertFrom-Json -AsHashtable -Depth 32
         $template.containers[0].env = @($template.containers[0].env) + @(@{ name = 'HEXAGON_DELIVERY_ATTEMPT'; value = $Record.attemptId })
         $body = Join-Path $Context.runtime "job-$($Record.attemptId).json"
-        [IO.File]::WriteAllText($body, (ConvertTo-PlatformBootstrapJson $template))
+        [IO.File]::WriteAllText($body, (ConvertTo-CanonicalJson $template))
         Assert-AzureLifecycleLease $Context
         $renew = (Get-Command Assert-AzureLifecycleLease).ScriptBlock
         $heartbeat = { & $renew $Context }.GetNewClosure()

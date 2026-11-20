@@ -32,13 +32,9 @@ public sealed class DatabaseRuntimeAccessTests
             ALTER TABLE sales.customers FORCE ROW LEVEL SECURITY;
             CREATE POLICY tenant ON sales.customers TO hexagon_app USING (tenant = current_setting('app.tenant_id', true));
             """);
-        var settings = new BootstrapSettings("unused", database.Database, "postgres", Guid.NewGuid().ToString(), new()
-        {
-            ["api"] = new(Guid.NewGuid().ToString(), true),
-            ["worker"] = new(Guid.NewGuid().ToString(), false),
-        });
-        await DatabaseBootstrapper.GrantRuntimeAccessAsync(database, settings, CancellationToken.None);
-        await DatabaseBootstrapper.GrantRuntimeAccessAsync(database, settings, CancellationToken.None);
+        var readDirectoryByRole = new Dictionary<string, bool> { ["api"] = true, ["worker"] = false };
+        await DatabaseBootstrapper.GrantRuntimeAccessAsync(database, database.Database, readDirectoryByRole, messagingEnabled: true, CancellationToken.None);
+        await DatabaseBootstrapper.GrantRuntimeAccessAsync(database, database.Database, readDirectoryByRole, messagingEnabled: true, CancellationToken.None);
         await ExecuteAsync(database, "SET SESSION AUTHORIZATION api;");
         await ExecuteAsync(database, "SELECT * FROM platform.\"Tenants\";");
         var denied = await Assert.ThrowsAsync<PostgresException>(() => ExecuteAsync(database, "SELECT * FROM sales.customers;"));

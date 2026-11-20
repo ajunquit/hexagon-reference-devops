@@ -36,19 +36,6 @@ function Assert-ReleaseSources {
     if (($names -contains 'web') -ne $Release.artifacts.Contains('web')) { throw 'Missing or unexpected web artifact.' }
 }
 
-function ConvertTo-AzureHostingInput {
-    param($Descriptor, $Release, $Policy, $Backend, $Frontend)
-    $registry = $Policy.infrastructure.registry_name
-    return ConvertTo-HostingInput $Descriptor $Release $Policy $Backend $Frontend { param($image) ConvertTo-EnvironmentImageReference $image $registry }
-}
-
-function ConvertTo-AwsHostingInput {
-    param($Descriptor, $Release, $Policy, $Backend, $Frontend)
-    $infra = $Policy.infrastructure
-    $repository = "$($infra.account_id).dkr.ecr.$($infra.region).amazonaws.com/$($infra.name_prefix)"
-    return ConvertTo-HostingInput $Descriptor $Release $Policy $Backend $Frontend { param($image) ConvertTo-AwsImageReference $image $repository }
-}
-
 function ConvertTo-HostingInput {
     # Validates the composition shared by every cloud; $ImageReference maps a release image to the environment registry.
     param($Descriptor, $Release, $Policy, $Backend, $Frontend, [scriptblock] $ImageReference)
@@ -100,19 +87,4 @@ function ConvertTo-HostingInput {
     return $result
 }
 
-function ConvertTo-EnvironmentImageReference([string] $Image, [string] $Registry) {
-    # Promotion copies the same manifest/layers into the target ACR; it never rebuilds the image.
-    return "$Registry.azurecr.io/" + $Image.Substring($Image.IndexOf('/') + 1)
-}
-
-function ConvertTo-AwsImageReference([string] $Image, [string] $Repository) {
-    # Delivery copies the same manifest into <account>.dkr.ecr.<region>.amazonaws.com/<name_prefix>/<artifact>,
-    # keeping the digest; the artifact is the last path segment of the release image.
-    $parts = $Image.Split('@')
-    if ($parts.Count -ne 2 -or $parts[1] -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'Release images must be pinned by digest.' }
-    $artifact = $parts[0].Substring($parts[0].LastIndexOf('/') + 1)
-    if ($artifact -cnotmatch '^[a-z0-9][a-z0-9._-]*$') { throw "Invalid artifact name '$artifact'." }
-    return "$Repository/$artifact@$($parts[1])"
-}
-
-Export-ModuleMember -Function Read-HostingContract, Assert-ReleaseSources, ConvertTo-AzureHostingInput, ConvertTo-AwsHostingInput
+Export-ModuleMember -Function Read-HostingContract, Assert-ReleaseSources, ConvertTo-HostingInput

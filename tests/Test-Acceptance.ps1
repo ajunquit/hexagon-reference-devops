@@ -7,14 +7,14 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
-foreach ($name in @('AcceptanceCleanup', 'AcceptanceRun', 'AzureAcceptance', 'PlatformBootstrap')) { Import-Module (Join-Path $repository "scripts/$name.psm1") -Force }
+foreach ($name in @('AcceptanceCleanup', 'AcceptanceRun', 'AcceptanceContracts', 'AzureAcceptance', 'CanonicalJson')) { Import-Module (Join-Path $repository "scripts/$name.psm1") -Force }
 $script:assertions = 0
 function Assert-True([bool] $Condition, [string] $Message) { if (-not $Condition) { throw $Message }; $script:assertions++ }
 function Assert-Rejected([scriptblock] $Action, [string] $Code) {
     try { & $Action | Out-Null } catch { Assert-True ($_.Exception.Message -like "*$Code*") "Unexpected rejection: $($_.Exception.Message)"; return }
     throw "Expected rejection: $Code"
 }
-function Copy-Value($Value) { return (ConvertTo-PlatformBootstrapJson $Value) | ConvertFrom-Json -AsHashtable -Depth 30 }
+function Copy-Value($Value) { return (ConvertTo-CanonicalJson $Value) | ConvertFrom-Json -AsHashtable -Depth 30 }
 $inventory = Get-Content -Raw (Join-Path $repository 'examples/environment-inventory.json') | ConvertFrom-Json -AsHashtable
 foreach ($root in $inventory.roots) {
     $root.status = 'Verified'; $root.lastOperation = 'Create'; $root.stateLineage = '44444444-4444-4444-4444-444444444444'; $root.stateSerial = 3
@@ -132,7 +132,7 @@ $port = {
         default { throw 'Unexpected cleanup port action.' }
     }
 }
-$cleanupModule = Get-Module AcceptanceCleanup
+$cleanupModule = Get-Module AzureAcceptance
 & $cleanupModule {
     param($testPort)
     $script:testPort = $testPort
@@ -154,15 +154,15 @@ try {
     foreach ($failure in @('', 'messaging')) {
         $workspace = Join-Path $repository "artifacts/acceptance-cleanup-$([guid]::NewGuid().ToString('N'))"
         [IO.Directory]::CreateDirectory($workspace) | Out-Null
-        [IO.File]::WriteAllText((Join-Path $workspace 'inventory.json'), (ConvertTo-PlatformBootstrapJson $inventory))
+        [IO.File]::WriteAllText((Join-Path $workspace 'inventory.json'), (ConvertTo-CanonicalJson $inventory))
         $context = @{ inventory = Copy-Value $inventory; prefix = 'fixture'; runtime = $workspace }
         $script:cleanupCalls.Clear(); $script:failRoot = $failure
         if ($failure) {
-            Assert-Rejected { Invoke-AcceptanceCleanup $context $consent $workspace -Confirm:$false } 'applyFailed'
+            Assert-Rejected { Invoke-AzureAcceptanceCleanup $context $consent $workspace -Confirm:$false } 'applyFailed'
             Assert-True (($cleanupCalls -join ',') -ceq 'Apply:messaging') 'A failed dependency deletion must prevent deleting hosting.'
         }
         else {
-            Invoke-AcceptanceCleanup $context $consent $workspace -Confirm:$false
+            Invoke-AzureAcceptanceCleanup $context $consent $workspace -Confirm:$false
             Assert-True (($cleanupCalls -join ',') -ceq 'Apply:messaging,Apply:hosting') 'Cleanup must use reverse dependency order.'
             Assert-True (@($context.inventory.roots | Where-Object status -CNE 'Destroyed').Count -eq 0) 'The real engine must confirm retirement of both roots.'
         }

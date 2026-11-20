@@ -120,4 +120,11 @@ function Assert-AzureOciImages([hashtable] $Context, [hashtable] $References, [s
     }
 }
 
-Export-ModuleMember -Function Publish-AzureOciArchive, Assert-AzureOciImages
+function Get-AzureDeliveryImageTarget([string] $Reference, [string] $Registry) {
+    # ACR keeps the repository path of the release.
+    if ($Registry -cnotmatch '^[a-z0-9]{5,50}[.]azurecr[.]io$' -or
+        $Reference -cnotmatch '^[a-z0-9.-]+(?::[0-9]+)?/([a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*)@(sha256:[0-9a-f]{64})$') { throw 'lifecycle.delivery.imageReferenceInvalid' }
+    return @{ repository = $Matches[1]; digest = $Matches[2]; image = "$Registry/$($Matches[1])@$($Matches[2])" }
+}
+
+Export-ModuleMember -Function Get-AzureDeliveryImageTarget, Publish-AzureOciArchive, Assert-AzureOciImages
