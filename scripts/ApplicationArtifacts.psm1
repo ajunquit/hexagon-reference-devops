@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 
 function Assert-ApplicationDelivery([hashtable] $Delivery, [string] $ReleaseSha256) {
     $json = ConvertTo-Json -InputObject $Delivery -Depth 20
@@ -94,21 +94,9 @@ function Expand-DeliveryCandidate([string] $Archive, [string] $Directory) {
     finally { $zip.Dispose() }
 }
 
-function Get-DeliveryImageTarget([string] $Reference, [string] $Registry) {
-    # ECR (ADR 0025): the registry is <server>/<short prefix> and each artifact keeps only its last path
-    # segment, the same rule as Export-AwsHostingInputs. ACR keeps the repository path of the release.
-    if ($Registry -cmatch '^([0-9]{12}[.]dkr[.]ecr[.][a-z0-9-]+[.]amazonaws[.]com)/([a-z][a-z0-9-]{2,18})$') {
-        $server = $Matches[1]; $prefix = $Matches[2]
-        if ($Reference -cnotmatch '^[a-z0-9.-]+(?::[0-9]+)?/(?:[a-z0-9._-]+/)*([a-z0-9]+(?:[._-][a-z0-9]+)*)@(sha256:[0-9a-f]{64})$') { throw 'lifecycle.delivery.imageReferenceInvalid' }
-        return @{ repository = "$prefix/$($Matches[1])"; digest = $Matches[2]; image = "$server/$prefix/$($Matches[1])@$($Matches[2])" }
-    }
-    if ($Registry -cnotmatch '^[a-z0-9]{5,50}[.]azurecr[.]io$' -or
-        $Reference -cnotmatch '^[a-z0-9.-]+(?::[0-9]+)?/([a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*)@(sha256:[0-9a-f]{64})$') { throw 'lifecycle.delivery.imageReferenceInvalid' }
-    return @{ repository = $Matches[1]; digest = $Matches[2]; image = "$Registry/$($Matches[1])@$($Matches[2])" }
-}
-
 function Test-DeliveryComponent {
-    param([string] $Directory, [hashtable] $Release, [string] $Component, [string] $Registry)
+    # $ImageTarget maps a release image to the registry of the instance: each cloud passes its own.
+    param([string] $Directory, [hashtable] $Release, [string] $Component, [scriptblock] $ImageTarget)
     $source = $(if ($Component -ceq 'devops') { $Release.artifacts.databaseBootstrap } else { @($Release.sources | Where-Object name -CEQ $Component)[0] })
     & (Join-Path $PSScriptRoot 'Test-ComponentBuild.ps1') -Directory $Directory -ExpectedRepository $source.repository -ExpectedCommit $source.commit -ExpectedProduct $Release.product -ExpectedComponent $Component | Out-Null
     $build = Get-Content -Raw -LiteralPath (Join-Path $Directory 'build.json') | ConvertFrom-Json -AsHashtable -Depth 32
@@ -127,7 +115,7 @@ function Test-DeliveryComponent {
     if ((@($references.Keys | Sort-Object) -join ',') -cne (@($build.artifacts.id | Sort-Object) -join ',')) { throw 'lifecycle.delivery.workloadsMismatch' }
     $images = @{}
     foreach ($artifact in $build.artifacts) {
-        $target = Get-DeliveryImageTarget $references[$artifact.id] $Registry
+        $target = & $ImageTarget $references[$artifact.id]
         if ($artifact.platform -cne 'linux/amd64' -or $artifact.imageDigest -cne $target.digest) { throw 'lifecycle.delivery.imageMismatch' }
         $images[$artifact.id] = @{ target = $target; file = Join-Path $Directory $artifact.file; sha256 = $artifact.sha256 }
     }
@@ -136,7 +124,7 @@ function Test-DeliveryComponent {
 
 function Receive-ApplicationCandidates {
     [CmdletBinding(SupportsShouldProcess = $true)]
-    param([hashtable] $Delivery, [hashtable] $Release, [string] $Registry, [string] $Directory, [scriptblock] $Heartbeat,
+    param([hashtable] $Delivery, [hashtable] $Release, [scriptblock] $ImageTarget, [string] $Directory, [scriptblock] $Heartbeat,
         [ValidateSet('backend', 'web', 'devops')][string[]] $ComponentNames = @('backend', 'web', 'devops'))
     if (-not $PSCmdlet.ShouldProcess($Release.product, 'Retrieve and verify immutable CI candidates')) { return }
     [IO.Directory]::CreateDirectory($Directory) | Out-Null
@@ -161,10 +149,10 @@ function Receive-ApplicationCandidates {
         if ($download.status -ne 200 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $candidate.archiveSha256) { throw 'lifecycle.delivery.archiveMismatch' }
         $expanded = Join-Path $Directory $component
         Expand-DeliveryCandidate $archive $expanded
-        $components[$component] = Test-DeliveryComponent $expanded $Release $component $Registry
+        $components[$component] = Test-DeliveryComponent $expanded $Release $component $ImageTarget
         if ($Heartbeat) { & $Heartbeat | Out-Null }
     }
     return $components
 }
 
-Export-ModuleMember -Function Assert-ApplicationDelivery, Assert-DeliveryGithubEvidence, Expand-DeliveryCandidate, Get-DeliveryImageTarget, Test-DeliveryComponent, Receive-ApplicationCandidates
+Export-ModuleMember -Function Assert-ApplicationDelivery, Assert-DeliveryGithubEvidence, Expand-DeliveryCandidate, Test-DeliveryComponent, Receive-ApplicationCandidates

@@ -1,43 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('ApplicationContracts', 'AcceptanceCleanup', 'AzureEnvironmentStore', 'EnvironmentSnapshot', 'LifecycleNative')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
-
-function Get-AcceptanceFixture([hashtable] $Inventory, [hashtable] $Inputs) {
-    if (-not $Inputs.ContainsKey('acceptance_fixture') -or $null -eq $Inputs.acceptance_fixture) { throw 'lifecycle.acceptance.fixtureRequired' }
-    $fixture = $Inputs.acceptance_fixture
-    if ($Inventory.instance.kind -cne 'Ephemeral' -or $Inventory.environment -cnotin @('dev', 'staging') -or $Inventory.dataPolicy -cne 'DeleteEphemeral' -or
-        $fixture.instanceId -cne $Inventory.instance.id -or $fixture.tenant -cne "e2e-$($Inventory.instance.id)-a" -or $fixture.otherTenant -cne "e2e-$($Inventory.instance.id)-b" -or
-        $fixture.subjectId -cnotmatch '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$' -or $fixture.Count -ne 4) { throw 'lifecycle.acceptance.fixtureInvalid' }
-    return $fixture
-}
-
-function Get-AcceptanceContracts([hashtable] $Release) {
-    $previous = $env:GH_TOKEN
-    if (-not $env:HEXAGON_APPLICATIONS_READ_TOKEN) { throw 'lifecycle.acceptance.sourceCredentialRequired' }
-    try {
-        $env:GH_TOKEN = $env:HEXAGON_APPLICATIONS_READ_TOKEN
-        $contracts = @{}
-        foreach ($component in @('backend', 'web')) {
-            $source = @($Release.sources | Where-Object name -CEQ $component)
-            if ($source.Count -ne 1) { throw 'lifecycle.acceptance.componentRequired' }
-            $manifest = @($source[0].manifests | Where-Object path -CEQ '.hexagon/acceptance-requirements.json')
-            if ($manifest.Count -ne 1) { throw 'lifecycle.acceptance.manifestRequired' }
-            $bytes = Get-GitHubFileBytes $source[0].repository $source[0].commit $manifest[0].path
-            if ($bytes.Length -gt 16384 -or (Get-LifecycleBytesHash $bytes) -cne $manifest[0].sha256) { throw 'lifecycle.acceptance.manifestChanged' }
-            $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
-            if (-not ($json | Test-Json -SchemaFile (Join-Path $PSScriptRoot '../contracts/schemas/acceptance-requirements-v1.schema.json') -ErrorAction SilentlyContinue)) { throw 'lifecycle.acceptance.manifestInvalid' }
-            $value = $json | ConvertFrom-Json -AsHashtable
-            if ($value.product -cne $Release.product -or $value.component -cne $component) { throw 'lifecycle.acceptance.manifestMismatch' }
-            $contracts[$component] = $value.contract
-        }
-        return $contracts
-    }
-    catch {
-        if ($_.Exception.Message -cmatch '^lifecycle[.][A-Za-z0-9.]+$') { throw }
-        throw 'lifecycle.acceptance.sourceUnavailable'
-    }
-    finally { $env:GH_TOKEN = $previous }
-}
+foreach ($name in @('AcceptanceCleanup', 'AzureEnvironmentStore', 'TerraformAzureLifecycle', 'EnvironmentLifecycle', 'CanonicalJson', 'EnvironmentSnapshot', 'LifecycleNative')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
 
 function Invoke-AzureBrowserAcceptance {
     [CmdletBinding(SupportsShouldProcess = $true)]
@@ -65,4 +28,29 @@ function Save-AcceptanceEvidence {
     return $hash
 }
 
-Export-ModuleMember -Function Get-AcceptanceFixture, Get-AcceptanceContracts, Invoke-AzureBrowserAcceptance, Save-AcceptanceEvidence
+function Invoke-AzureAcceptanceCleanup {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([hashtable] $Context, [hashtable] $Consent, [string] $Workspace)
+    if (-not $PSCmdlet.ShouldProcess($Context.prefix, 'Retire only the pre-reviewed ephemeral resource set')) { return }
+    $inventoryPath = Join-Path $Workspace 'inventory.json'
+    Invoke-AzureLifecycleQuiesce $Context -Confirm:$false | Out-Null
+    foreach ($id in @(Get-EnvironmentRootOrder $Context.inventory Destroy)) {
+        $Context.inventory = Read-EnvironmentInventory $inventoryPath
+        $root = @($Context.inventory.roots | Where-Object id -CEQ $id)[0]
+        $plan = New-AzureLifecyclePlan $Context $root Destroy -Confirm:$false
+        $json = Get-Content -Raw -LiteralPath $plan.jsonPath | ConvertFrom-Json -AsHashtable -Depth 100
+        Assert-AcceptanceDestroyPlan $Context.inventory $root $Consent $json
+        $hash = Add-EnvironmentRootPlan $inventoryPath $id Destroy $plan.binaryPath $plan.jsonPath (Get-LifecycleFileHash $inventoryPath) -Confirm:$false
+        Publish-AzureLifecycleObject $Context "$($Context.prefix)/plans/$hash/$id.tfplan" ([IO.File]::ReadAllBytes($plan.binaryPath)) (Get-LifecycleFileHash $plan.binaryPath) -Confirm:$false
+        Publish-AzureLifecycleObject $Context "$($Context.prefix)/plans/$hash/$id.json" ([IO.File]::ReadAllBytes($plan.jsonPath)) (Get-LifecycleFileHash $plan.jsonPath) -Confirm:$false
+        Save-AzureLifecycleJournal $Context $inventoryPath | Out-Null
+        $Context.inventory = Read-EnvironmentInventory $inventoryPath
+        $port = New-AzureLifecyclePort $Context
+        $confirmation = "DESTROY $($Context.inventory.product) $($Context.inventory.environment) $($Context.inventory.instance.id)"
+        Invoke-EnvironmentRootOperation $inventoryPath $id $plan.binaryPath $plan.jsonPath $hash $confirmation $port -Confirm:$false | Out-Null
+    }
+    $Context.inventory = Read-EnvironmentInventory $inventoryPath
+    if (@($Context.inventory.roots | Where-Object status -CNE 'Destroyed').Count -ne 0) { throw 'lifecycle.acceptance.cleanupIncomplete' }
+}
+
+Export-ModuleMember -Function Invoke-AzureBrowserAcceptance, Save-AcceptanceEvidence, Invoke-AzureAcceptanceCleanup

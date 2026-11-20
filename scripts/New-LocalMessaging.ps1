@@ -20,18 +20,14 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Import-Module (Join-Path $PSScriptRoot 'LocalMessaging.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ContractSchemas.psm1')
 
 $manifestContext = Get-LocalMessagingManifest -BackendPath $BackendPath
 $manifest = $manifestContext.Manifest
 $policyModel = $null
 if ($Policy) {
     $policyPath = (Resolve-Path -LiteralPath $Policy).Path
-    $validator = switch ([string] $manifest.provider) {
-        'azure-service-bus' { 'Test-AzureServiceBusPolicy.ps1' }
-        'aws-sns-sqs' { 'Test-AwsSnsSqsPolicy.ps1' }
-        'rabbitmq' { 'Test-RabbitMqPolicy.ps1' }
-        default { throw "Unsupported messaging provider '$($manifest.provider)'." }
-    }
+    $validator = "Test-$(Invoke-LocalMessagingProvider (Get-LocalMessagingProviderModule ([string] $manifest.provider)) Get-LocalMessagingContracts)Policy.ps1"
     & (Join-Path $PSScriptRoot $validator) -Policy $policyPath
     $policyModel = Get-Content -Raw -LiteralPath $policyPath | ConvertFrom-Json
 }
@@ -51,8 +47,7 @@ else {
 }
 
 $bindingsJson = ($plan.Bindings | ConvertTo-Json -Depth 20) + "`n"
-$bindingsSchema = Join-Path $repositoryRoot 'contracts/schemas/local-messaging-bindings-v1.schema.json'
-if (-not ($bindingsJson | Test-Json -SchemaFile $bindingsSchema -ErrorAction SilentlyContinue)) {
+if (-not (Test-ContractJson $bindingsJson local-messaging-bindings-v1)) {
     throw 'Generated local messaging bindings do not satisfy LocalMessagingBindings v1.'
 }
 
@@ -72,7 +67,7 @@ function Write-GeneratedText {
     try {
         [IO.File]::WriteAllText($temporaryPath, $Text.TrimEnd() + "`n", [Text.UTF8Encoding]::new($false))
         if (-not $IsWindows -and $Path.EndsWith('.sh', [StringComparison]::Ordinal)) {
-            # Floci only runs executable initialization hooks on Unix hosts.
+            # Emulators run executable initialization hooks only on Unix hosts.
             $mode = [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite -bor [IO.UnixFileMode]::UserExecute -bor [IO.UnixFileMode]::GroupRead -bor [IO.UnixFileMode]::GroupExecute -bor [IO.UnixFileMode]::OtherRead -bor [IO.UnixFileMode]::OtherExecute
             [IO.File]::SetUnixFileMode($temporaryPath, $mode)
         }

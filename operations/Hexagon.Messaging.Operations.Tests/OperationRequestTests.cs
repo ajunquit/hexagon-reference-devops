@@ -28,27 +28,27 @@ public sealed class OperationRequestTests
         Assert.Throws<InvalidOperationException>(() => OperationRequest.Parse(Arguments(harness.Save(OperationHarness.Target() with { ReplayEnabled = false }))));
     }
 
-    [Theory]
-    [InlineData("azure-service-bus")]
-    [InlineData("aws-sns-sqs")]
-    [InlineData("rabbitmq")]
-    public async Task PlanDoesNotRequireBrokerOrCredentials(string provider)
+    [Fact]
+    public async Task PlanDoesNotRequireBrokerOrCredentials()
     {
-        using var harness = new OperationHarness();
-        harness.SetEnvironment("HEXAGON_OPERATIONS_CONNECTION_STRING", "secret://invalid");
-        var result = await harness.RunAsync(OperationHarness.Target(provider), "plan");
-        Assert.Equal(0, result.ExitCode);
-        Assert.Contains("planned", result.Output);
-        Assert.DoesNotContain("secret", result.Output);
+        await AssertPlanWithoutBrokerAsync(OperationHarness.Target());
     }
 
     [Fact]
-    public void CrossAccountQueueUrlsAreRejected()
+    public void UnknownProvidersAreRejected()
     {
-        Assert.Throws<InvalidOperationException>(() => (OperationHarness.Target("aws-sns-sqs") with
-        {
-            DeadLetterQueue = "https://sqs.us-east-1.amazonaws.com/111111111111/sales-worker-dlq",
-        }).Validate());
+        Assert.Throws<InvalidOperationException>(() => (OperationHarness.Target() with { Provider = "unknown-broker" }).Validate());
+    }
+
+    /// <summary>Shared by the tests of each provider: a plan never connects nor prints a credential.</summary>
+    internal static async Task AssertPlanWithoutBrokerAsync(OperationTarget target)
+    {
+        using var harness = new OperationHarness();
+        harness.SetEnvironment("HEXAGON_OPERATIONS_CONNECTION_STRING", "secret://invalid");
+        var result = await harness.RunAsync(target, "plan");
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("planned", result.Output);
+        Assert.DoesNotContain("secret", result.Output);
     }
 
     [Fact]

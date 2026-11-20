@@ -85,7 +85,7 @@ pwsh ./scripts/Export-RabbitMqTerraformInputs.ps1 `
 `-WhatIf` valida las fuentes sin escribir. El archivo generado se ignora en Git y no contiene
 secretos.
 
-El root usa el backend HTTP genérico para no acoplar RabbitMQ a Azure o AWS. La automatización debe
+El root usa el backend HTTP genérico para no acoplar RabbitMQ a ninguna nube. La automatización debe
 inyectar una URL HTTPS y endpoints de lock mediante `TF_HTTP_ADDRESS`, `TF_HTTP_LOCK_ADDRESS` y
 `TF_HTTP_UNLOCK_ADDRESS`; las credenciales usan `TF_HTTP_USERNAME` y `TF_HTTP_PASSWORD`.
 

@@ -7,6 +7,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+Import-Module (Join-Path $root 'scripts/CanonicalJson.psm1') -Force
 Import-Module (Join-Path $root 'scripts/PlatformBootstrap.psm1') -Force
 Import-Module (Join-Path $root 'scripts/PlatformBootstrap.Execution.psm1') -Force
 $module = Get-Module PlatformBootstrap.Execution
@@ -66,7 +67,7 @@ try {
                         if ($script:failPush) { throw 'bootstrap.command.terraform' }
                         $pushed = Get-Content -Raw -LiteralPath $Arguments[-1] | ConvertFrom-Json -AsHashtable
                         $pushed.serial++
-                        $script:remoteState = ConvertTo-PlatformBootstrapJson $pushed
+                        $script:remoteState = ConvertTo-CanonicalJson $pushed
                     }
                     elseif ($Arguments[2] -ceq 'pull') { return $script:remoteState }
                     return ''
@@ -92,7 +93,7 @@ try {
     Assert-Rejected { Invoke-BootstrapApply $parsed $alteredObservation State $workspace $review.reviewSha256 } 'bootstrap.reviewStale'
     $document = Get-Content -Raw -LiteralPath $reviewPath | ConvertFrom-Json -AsHashtable
     $document.createdAt = [DateTimeOffset]::UtcNow.AddDays(-2).ToString('o')
-    [IO.File]::WriteAllText($reviewPath, (ConvertTo-PlatformBootstrapJson $document))
+    [IO.File]::WriteAllText($reviewPath, (ConvertTo-CanonicalJson $document))
     $oldHash = (Get-FileHash $reviewPath).Hash.ToLowerInvariant()
     Assert-Rejected { Assert-BootstrapReview $parsed $observation State $workspace $oldHash } 'bootstrap.reviewExpired'
     $review = New-BootstrapReview $parsed $observation State $workspace

@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
 $script:bootstrapRoot = Split-Path -Parent $PSScriptRoot
 
@@ -23,7 +24,7 @@ function Invoke-BootstrapApi {
     param([ValidateSet('GET', 'PUT', 'POST', 'PATCH')][string] $Method, [string] $Path, [object] $Body)
     $arguments = @('api', '--method', $Method, $Path, '-H', 'X-GitHub-Api-Version: 2026-03-10')
     $inputText = ''
-    if ($null -ne $Body) { $arguments += @('--input', '-'); $inputText = ConvertTo-PlatformBootstrapJson $Body }
+    if ($null -ne $Body) { $arguments += @('--input', '-'); $inputText = ConvertTo-CanonicalJson $Body }
     $text = Invoke-BootstrapNative -Tool gh -Arguments $arguments -InputText $inputText
     if ($text.Trim()) { return $text | ConvertFrom-Json -AsHashtable -Depth 64 }
 }
@@ -35,7 +36,7 @@ function Invoke-BootstrapAzure {
 }
 
 function Get-BootstrapSourceHash {
-    $paths = @('scripts/PlatformBootstrap.psm1', 'scripts/PlatformBootstrap.Execution.psm1', 'scripts/Invoke-PlatformBootstrap.ps1',
+    $paths = @('scripts/PlatformBootstrap.psm1', 'scripts/CanonicalJson.psm1', 'scripts/PlatformBootstrap.Execution.psm1', 'scripts/Invoke-PlatformBootstrap.ps1',
         'scripts/Invoke-PlatformBootstrapStage.ps1', 'scripts/Test-PlatformFederation.ps1', '.github/workflows/platform-diagnostic.yml',
         'contracts/schemas/platform-bootstrap-v1.schema.json', 'contracts/schemas/platform-bootstrap-review-v1.schema.json')
     $paths += @(Get-ChildItem -LiteralPath (Join-Path $script:bootstrapRoot 'terraform/bootstrap/azure'), (Join-Path $script:bootstrapRoot 'terraform/bootstrap/azure-access') -File -Force |
@@ -69,7 +70,7 @@ function Get-BootstrapBackend([hashtable] $Definition, [string] $Stage) {
 }
 
 function Write-BootstrapFile([string] $Path, [object] $Value) {
-    [IO.File]::WriteAllText($Path, (ConvertTo-PlatformBootstrapJson $Value) + "`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($Path, (ConvertTo-CanonicalJson $Value) + "`n", [Text.UTF8Encoding]::new($false))
 }
 
 function Get-BootstrapTerraformVariables([hashtable] $Definition, [hashtable] $Observation, [string] $Stage) {
@@ -213,7 +214,7 @@ function Assert-BootstrapGithub {
         $reviewers = $Desired[$environment].environment.reviewers
         if ($reviewers.Count -gt 0) {
             if ($rules.Count -ne 1 -or $rules[0].prevent_self_review -ne $true -or
-                (ConvertTo-PlatformBootstrapJson @($rules[0].reviewers | Sort-Object id)) -cne (ConvertTo-PlatformBootstrapJson @($reviewers | Sort-Object id))) { throw 'bootstrap.githubReviewerDrift' }
+                (ConvertTo-CanonicalJson @($rules[0].reviewers | Sort-Object id)) -cne (ConvertTo-CanonicalJson @($reviewers | Sort-Object id))) { throw 'bootstrap.githubReviewerDrift' }
         }
         elseif ($rules.Count -gt 0) { throw 'bootstrap.githubReviewerDrift' }
         if (@($actual.settings.protection_rules | Where-Object { $_.type -ceq 'wait_timer' -and $_.wait_timer -ne 0 }).Count -gt 0) { throw 'bootstrap.githubProtectionDrift' }
@@ -308,7 +309,7 @@ function Invoke-BootstrapApply {
     if ($Stage -ceq 'GitHub') {
         $review = Get-Content -Raw -LiteralPath (Join-Path $directory 'github.json') | ConvertFrom-Json -AsHashtable
         $actual = Get-BootstrapGithubSnapshot $Parsed.definition $Observation
-        if ((ConvertTo-PlatformBootstrapJson $actual) -cne (ConvertTo-PlatformBootstrapJson $review.before)) { throw 'bootstrap.githubPlanStale' }
+        if ((ConvertTo-CanonicalJson $actual) -cne (ConvertTo-CanonicalJson $review.before)) { throw 'bootstrap.githubPlanStale' }
         Set-BootstrapGithub $Parsed.definition $review.desired $actual
         $fresh = Get-PlatformBootstrapObservation $Parsed.definition
         Assert-BootstrapGithub (Get-BootstrapGithubSnapshot $Parsed.definition $fresh) $review.desired
@@ -362,7 +363,7 @@ function Move-BootstrapState {
     # Terraform may advance the serial by one while importing the local snapshot.
     if ($remote.lineage -cne $localState.lineage -or $remote.serial -lt $localState.serial -or
         $remote.serial -gt ($localState.serial + 1) -or
-        (ConvertTo-PlatformBootstrapJson $remote.resources) -cne (ConvertTo-PlatformBootstrapJson $localState.resources)) { throw 'bootstrap.migrationMismatch' }
+        (ConvertTo-CanonicalJson $remote.resources) -cne (ConvertTo-CanonicalJson $localState.resources)) { throw 'bootstrap.migrationMismatch' }
     Copy-Item -LiteralPath (Join-Path $script:bootstrapRoot 'terraform/bootstrap/azure/versions.tf') -Destination (Join-Path $directory 'versions.tf') -Force
     Initialize-BootstrapTerraform -Directory $directory -Definition $definition -Stage State
     $confirmation = (Invoke-BootstrapNative terraform @("-chdir=$directory", 'state', 'pull')) | ConvertFrom-Json -AsHashtable -Depth 100

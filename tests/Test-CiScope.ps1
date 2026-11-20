@@ -20,27 +20,28 @@ function New-ScopeRoot([hashtable] $Manifests) {
     return $root
 }
 
-$awsHash = 'e' * 64
+$messagingHash = 'e' * 64
 $reader = {
     param($repository, $commit, $path, $product)
     if ($product -cne 'hexagon-example' -or $repository -cne 'example/backend') { throw 'The manifest must be read for the descriptor backend.' }
-    [pscustomobject] @{ Manifest = [pscustomobject] @{ provider = 'aws-sns-sqs' }; Sha256 = $awsHash }
+    [pscustomobject] @{ Manifest = [pscustomobject] @{ provider = 'rabbitmq' }; Sha256 = $messagingHash }
 }
-$messaging = @{ path = '.hexagon/messaging-requirements.json'; sha256 = $awsHash }
+$messaging = @{ path = '.hexagon/messaging-requirements.json'; sha256 = $messagingHash }
 $hosting = @{ path = '.hexagon/backend-hosting-requirements.json'; sha256 = ('c' * 64) }
 
 # The template, without descriptors, tests every provider.
 $template = Join-Path ([IO.Path]::GetTempPath()) "hexagon-ci-scope-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $template | Out-Null
 $all = Get-CiMessagingProviders -Root $template -ReadManifest { throw 'The template must not read applications.' }
-if (($all -join ',') -cne 'azure-service-bus,aws-sns-sqs,rabbitmq') { throw "The template must test every provider, got '$($all -join ',')'." }
+Import-Module (Join-Path $PSScriptRoot '../scripts/MessagingOperations.psm1')
+if (($all -join ',') -cne ((Get-OperationsProviders) -join ',') -or $all -cnotcontains 'rabbitmq') { throw "The template must test every provider, got '$($all -join ',')'." }
 
 # A product tests only the provider of its backend, once, whatever its number of environments.
 $product = New-ScopeRoot @{ dev = @($messaging, $hosting); staging = @($messaging, $hosting) }
 $only = Get-CiMessagingProviders -Root $product -ReadManifest $reader
-if (($only -join ',') -cne 'aws-sns-sqs') { throw "A product must test only its provider, got '$($only -join ',')'." }
+if (($only -join ',') -cne 'rabbitmq') { throw "A product must test only its provider, got '$($only -join ',')'." }
 $matrix = ConvertTo-CiMessagingMatrix -Providers $only | ConvertFrom-Json
-if ($matrix.Count -ne 1 -or $matrix[0].provider -cne 'aws-sns-sqs' -or $matrix[0].'test-class' -cne 'AwsRuntimeTests') {
+if ($matrix.Count -ne 1 -or $matrix[0].provider -cne 'rabbitmq' -or $matrix[0].'test-class' -cne 'RabbitMqRuntimeTests') {
     throw 'The matrix must map the provider to its broker tests.'
 }
 
@@ -58,17 +59,18 @@ if (-not $rejected) { throw 'A manifest that differs from its descriptor must be
 # The integrations run when the change can alter them, or when the change is unknown.
 if (-not (Test-CiIntegrationChange -ChangedPaths $null)) { throw 'An unknown change must run every integration.' }
 foreach ($changed in @(
-    'operations/Hexagon.Messaging.Operations/AwsOperations.cs',
+    'operations/Hexagon.Messaging.Operations/RabbitMqOperations.cs',
     'scripts/LocalMessaging.psm1',
     'scripts/Test-RabbitMqPolicy.ps1',
-    'scripts/AzureServiceBusContracts.psm1',
+    'scripts/RabbitMqContracts.psm1',
+    'scripts/RabbitMqOperationsPolicy.psm1',
     'products/hexagon-example/environments/dev/descriptor.json',
     'tests/Test-LocalMessagingRuntime.ps1',
     '.github/workflows/ci.yml',
     'global.json')) {
     if (-not (Test-CiIntegrationChange -ChangedPaths @('docs/README.md', $changed))) { throw "A change to '$changed' must run the integrations." }
 }
-foreach ($changed in @('terraform/modules/hosting/aws/main.tf', 'docs/ci-y-artefactos.md', '.github/workflows/delivery.yml', 'scripts/Invoke-AwsEnvironment.ps1', 'acceptance/package.json')) {
+foreach ($changed in @('terraform/README.md', 'docs/ci-y-artefactos.md', '.github/workflows/delivery.yml', 'scripts/Invoke-EnvironmentWorkflow.ps1', 'acceptance/package.json')) {
     if (Test-CiIntegrationChange -ChangedPaths @($changed)) { throw "A change to '$changed' must not run the integrations." }
 }
 if (Test-CiIntegrationChange -ChangedPaths @()) { throw 'An empty change must not run the integrations.' }

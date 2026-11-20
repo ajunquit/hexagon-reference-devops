@@ -2,7 +2,7 @@
 
 La implementación sigue el [ADR 0011](adr/0011-ci-por-componente-y-artefactos-verificables.md).
 Cada repositorio tiene `.github/workflows/ci.yml`, independiente de los otros componentes. Se
-ejecuta en PR a `main`, push a `main` y manualmente. No tiene credenciales de Azure, permisos de
+ejecuta en PR a `main`, push a `main` y manualmente. No tiene credenciales de ninguna nube, permisos de
 escritura del repositorio ni despliegues. Terraform sigue siendo la única herramienta IaC.
 Los repositorios .NET fijan el SDK en global.json sin roll-forward; setup-dotnet lee ese mismo archivo.
 
@@ -14,16 +14,16 @@ Los repositorios .NET fijan el SDK en global.json sin roll-forward; setup-dotnet
 | Backend | Core local fijado por commit, contratos, build sin advertencias, pruebas reales con PostgreSQL/broker efímeros, formato y modelo de cada contexto de módulo; tres archivos OCI |
 | DevOps | Contratos y fuentes, pruebas de exportación/integridad, roots Terraform con fmt/validate y pruebas mock, operación real del broker y ciclo local de topología, permisos/RLS PostgreSQL; archivo OCI del bootstrap |
 
-Las pruebas de integración usan contenedores locales desechables y datos ficticios. Las pruebas
-Azure aceptan las licencias del emulador y SQL Server exclusivamente para ese entorno de prueba.
+Las pruebas de integración usan contenedores locales desechables y datos ficticios. Si un emulador
+exige aceptar licencias, la prueba las acepta exclusivamente para ese entorno de prueba.
 El job de validación comparte la caché de plugins entre roots, sin usar estado remoto.
 Los lockfiles incluyen checksums oficiales para Windows/Linux amd64. Al cambiar un proveedor,
 regenera sus locks con `terraform providers lock -platform=windows_amd64 -platform=linux_amd64`
 antes de comprobar init con `-lockfile=readonly`; no se relaja la verificación de paquetes.
 
-La copia de política Azure para la prueba del ciclo local fija TTL PT1H y ventana de duplicados
-PT5M, límites del emulador 2.0. El generador rechaza valores superiores antes de escribir archivos;
-no modifica la política cloud. La prueba falla también si no puede retirar sus contenedores.
+Si un emulador tiene límites menores que la nube, la copia de política de la prueba del ciclo local
+los respeta y el generador rechaza valores superiores antes de escribir archivos; no modifica la
+política cloud. La prueba falla también si no puede retirar sus contenedores.
 
 `Test-Repository.ps1 -VerifySources` verifica los descriptores reales de `products/` desde sus
 commits y SHA-256. Una plantilla sin descriptores no hace lecturas remotas de aplicaciones. Los
@@ -46,7 +46,7 @@ build.json final conserva la evidencia de dependencia. Cambiar de core exige rev
 en el pin; no se usa una rama mutable ni el paquete local más reciente de otra ejecución.
 
 Configura `HEXAGON_CORE_READ_TOKEN` en el repositorio backend: un token fine-grained con
-**Contents: read** limitado a `hexagon-core-dotnet`. No necesita Packages:write ni acceso a Azure.
+**Contents: read** limitado a `hexagon-core-dotnet`. No necesita Packages:write ni acceso a una nube.
 `GITHUB_PACKAGES_TOKEN` con solo read:packages permite descargar paquetes publicados, pero no clonar
 el código privado. Un token local tampoco se convierte automáticamente en un secreto de Actions.
 Si falta el acceso, el job backend falla con una explicación antes de compilar; no omite pruebas
@@ -98,7 +98,7 @@ contiene `build.json` y los archivos declarados:
 | artifacts[].sha256 | Checksum de los bytes exactos del archivo distribuido |
 | imageDigest, platform | Digest del manifiesto OCI y plataforma de la imagen; no son el checksum del tar |
 
-La SPA entrega `web.tar.gz` sin runtime-config.json ni staticwebapp.config.json. DevOps añadirá el
+La SPA entrega `web.tar.gz` sin runtime-config.json ni archivos de control del host. DevOps añadirá el
 overlay del ambiente a una copia de despliegue después de verificar el bundle original; no cambia
 la build ni su checksum. Se rechazan mapas de fuentes, archivos de credenciales, enlaces y rutas
 que puedan escapar del directorio.
@@ -164,8 +164,9 @@ Referencias: [seguridad de Actions](https://docs.github.com/en/actions/reference
 
 El job `scope` (`scripts/Get-CiScope.ps1`) decide qué brokers prueba `messaging-integration`:
 
-- **Plantilla** (sin descriptores en `products/`): los tres, Azure Service Bus, AWS SNS/SQS y
-  RabbitMQ, porque todos los productos dependen de ella.
+- **Plantilla** (sin descriptores en `products/`): todos los proveedores del repositorio, los de
+  su nube y RabbitMQ, porque todos los productos dependen de ella. Cada proveedor declara su clase de
+  pruebas en su `<Proveedor>OperationsPolicy.psm1`.
 - **Producto:** solo el proveedor que declara su backend. Cada descriptor fija el commit del backend
   y el SHA-256 de `.hexagon/messaging-requirements.json`; `scope` lo lee con el token de lectura,
   valida esquema, producto y hash, y toma su `provider`. Así un producto no gasta tiempo ni cómputo

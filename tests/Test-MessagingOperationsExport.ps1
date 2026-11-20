@@ -28,7 +28,11 @@ try {
         $global:LASTEXITCODE = 0
         @{ type = 'file'; encoding = 'base64'; content = [Convert]::ToBase64String([byte[]] $bytes) } | ConvertTo-Json -Compress
     }
-    foreach ($provider in @('azure-service-bus', 'aws-sns-sqs', 'rabbitmq')) {
+    # One fixture per provider of the repository: each template brings those of its cloud.
+    $fixtures = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'fixtures/operations') -Filter '*.ps1' -File | Sort-Object Name)
+    if ($fixtures.Count -eq 0) { throw 'No messaging operations export fixture.' }
+    foreach ($fixture in $fixtures) {
+        $provider = $fixture.BaseName
         $manifest = Get-Content -Raw (Join-Path $PSScriptRoot 'fixtures/backend/.hexagon/messaging-requirements.json') | ConvertFrom-Json
         $manifest.provider = $provider
         $global:HexagonOperationsTestManifest = [Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 30))
@@ -38,41 +42,8 @@ try {
         $topology = Get-Content -Raw (Join-Path $root "examples/$provider-policy.json") | ConvertFrom-Json
         $policy = Get-Content -Raw (Join-Path $root 'examples/messaging-operations-policy.json') | ConvertFrom-Json
         $policy.provider = $provider
-        if ($provider -cne 'aws-sns-sqs') { foreach ($consumer in $policy.consumers) { $consumer.oldestMessageAgeSeconds = $null } }
         $mapping = @{ consumers = @{} }
-        switch ($provider) {
-            'azure-service-bus' {
-                $policy.notificationTargets = @('/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-example/providers/Microsoft.Insights/actionGroups/example')
-                $policy.operatorIdentities.worker = '00000000-0000-0000-0000-000000000011'
-                $policy.operatorIdentities.'sales-worker' = '00000000-0000-0000-0000-000000000012'
-                $policy.consumers[0].deadLetterThreshold = 1
-                $policy.consumers[0].quarantineReviewHours = 24
-                $mapping.namespace = @{ name = $topology.namespace.name }
-                foreach ($consumer in $topology.consumers) { $mapping.consumers[$consumer.id] = @{ name = $consumer.subscriptionName; topic_name = $topology.destinations[0].topicName } }
-                $outputs = @{ azure_service_bus = @{ value = $mapping } }
-            }
-            'aws-sns-sqs' {
-                foreach ($consumer in $topology.consumers) {
-                    $queue = @{ name = $consumer.queueName; url = "https://sqs.us-east-1.amazonaws.com/000000000000/$($consumer.queueName)"; arn = "arn:aws:sqs:us-east-1:000000000000:$($consumer.queueName)" }
-                    if ($consumer.redrive.enabled) {
-                        $name = $consumer.redrive.deadLetterQueueName
-                        $queue.dead_letter_queue = @{ name = $name; url = "https://sqs.us-east-1.amazonaws.com/000000000000/$name"; arn = "arn:aws:sqs:us-east-1:000000000000:$name" }
-                    }
-                    $mapping.consumers[$consumer.id] = $queue
-                }
-                $outputs = @{ aws_sns_sqs = @{ value = $mapping } }
-            }
-            'rabbitmq' {
-                $policy.notificationTargets = @()
-                $mapping.virtual_host = $topology.virtualHost
-                foreach ($consumer in $topology.consumers) {
-                    $queue = @{ name = $consumer.queueName }
-                    if ($consumer.deadLetter.enabled) { $queue.dead_letter = @{ queue_name = $consumer.deadLetter.queueName } }
-                    $mapping.consumers[$consumer.id] = $queue
-                }
-                $outputs = @{ messaging_topology = @{ value = $mapping } }
-            }
-        }
+        $outputs = & (& $fixture.FullName) $policy $topology $mapping
         $arguments = @{
             Descriptor = Join-Path $temporary 'descriptor.json'
             TopologyPolicy = Join-Path $temporary 'topology.json'

@@ -1,40 +1,9 @@
-using System.Text.Json;
 using Npgsql;
 
 namespace Hexagon.Database.Bootstrap;
 
 internal static class DatabaseBootstrapper
 {
-    public static async Task BindPrincipalsAsync(NpgsqlConnection postgres, BootstrapSettings settings, CancellationToken cancellationToken)
-    {
-        foreach (var pair in settings.Workloads)
-        {
-            // Reject an existing PostgreSQL role mapped to another identity instead of taking it over.
-            await using var lookup = new NpgsqlCommand("SELECT to_jsonb(p) FROM pg_catalog.pgaadauth_list_principals(false) p WHERE rolename = @role", postgres);
-            lookup.Parameters.AddWithValue("role", pair.Key);
-            var existing = await lookup.ExecuteScalarAsync(cancellationToken) as string;
-            if (existing is not null)
-            {
-                using var document = JsonDocument.Parse(existing);
-                var values = document.RootElement.EnumerateObject().ToDictionary(property => property.Name, property => property.Value, StringComparer.OrdinalIgnoreCase);
-                if (!string.Equals(values["objectid"].GetString(), pair.Value.ObjectId, StringComparison.OrdinalIgnoreCase) ||
-                    values["principaltype"].GetString() != "service" || values["isadmin"].GetInt32() != 0)
-                {
-                    throw new InvalidOperationException("Database principal mapping does not match the workload.");
-                }
-                continue;
-            }
-            await using var create = new NpgsqlCommand("SELECT pg_catalog.pgaadauth_create_principal_with_oid(@role, @oid, 'service', false, false)", postgres);
-            create.Parameters.AddWithValue("role", pair.Key);
-            create.Parameters.AddWithValue("oid", pair.Value.ObjectId);
-            await create.ExecuteNonQueryAsync(cancellationToken);
-        }
-    }
-
-    public static Task GrantRuntimeAccessAsync(NpgsqlConnection database, BootstrapSettings settings, CancellationToken cancellationToken) =>
-        GrantRuntimeAccessAsync(database, settings.Database,
-            settings.Workloads.ToDictionary(pair => pair.Key, pair => pair.Value.ReadDirectory), settings.MessagingEnabled, cancellationToken);
-
     /// <summary>Grants each login role its runtime roles; <paramref name="readDirectoryByRole"/> marks the API.</summary>
     public static async Task GrantRuntimeAccessAsync(NpgsqlConnection database, string databaseName,
         IReadOnlyDictionary<string, bool> readDirectoryByRole, bool messagingEnabled, CancellationToken cancellationToken,

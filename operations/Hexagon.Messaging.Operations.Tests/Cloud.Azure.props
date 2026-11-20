@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.ServiceBus" />
+    <None Update="servicebus-config.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

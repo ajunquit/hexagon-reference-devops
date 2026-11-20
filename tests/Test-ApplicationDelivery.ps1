@@ -7,7 +7,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
-foreach ($name in @('AzureApplicationDelivery', 'ApplicationArtifacts', 'AzureOciDelivery', 'AzureMaintenanceDelivery', 'AzureEnvironmentStore', 'PlatformBootstrap', 'EnvironmentSnapshot', 'EnvironmentLifecycle')) {
+foreach ($name in @('AzureApplicationDelivery', 'ApplicationArtifacts', 'AzureOciDelivery', 'AzureMaintenanceDelivery', 'AzureEnvironmentStore', 'CanonicalJson', 'EnvironmentSnapshot', 'EnvironmentLifecycle')) {
     Import-Module (Join-Path $repository "scripts/$name.psm1")
 }
 if (-not ('Hexagon.DeliveryTests.DeliveryHttpHandler' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'DeliveryHttpHandler.cs') }
@@ -22,8 +22,8 @@ function Assert-Rejected([scriptblock] $Action, [string] $Code) {
     throw "Expected rejection: $Code"
 }
 function Bytes([string] $Value) { return ,[Text.Encoding]::UTF8.GetBytes($Value) }
-function Copy-Value([object] $Value) { return (ConvertTo-PlatformBootstrapJson $Value) | ConvertFrom-Json -AsHashtable -Depth 50 }
-function Write-Json([string] $Path, [object] $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-PlatformBootstrapJson $Value) + "`n") }
+function Copy-Value([object] $Value) { return (ConvertTo-CanonicalJson $Value) | ConvertFrom-Json -AsHashtable -Depth 50 }
+function Write-Json([string] $Path, [object] $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-CanonicalJson $Value) + "`n") }
 function Write-Tar([string] $Path, [hashtable] $Files) {
     $stream = [IO.File]::Create($Path); $writer = [System.Formats.Tar.TarWriter]::new($stream)
     try {
@@ -99,7 +99,7 @@ try {
     $release.artifacts.backend = @{ 'example-api' = "source.example.test/product/api@sha256:$manifestHash" }
     $release.artifacts.databaseBootstrap.image = "source.example.test/database-bootstrap@sha256:$manifestHash"
     $release.artifacts.web.sha256 = Get-LifecycleFileHash $webPath
-    $handler = [Hexagon.DeliveryTests.DeliveryHttpHandler]::new()
+    $handler = [Hexagon.DeliveryTests.DeliveryHttpHandler]::new(); $handler.RegistrySuffix = '.azurecr.io'
     & $artifactsModule { param($h) $script:deliveryHandler = $h; function script:New-DeliveryHttpClient { return [Net.Http.HttpClient]::new($script:deliveryHandler, $false) } } $handler
     $counter = 100
     foreach ($component in @('backend', 'web', 'devops')) {
@@ -117,41 +117,42 @@ try {
             $files = @{ 'image.oci.tar' = [IO.File]::ReadAllBytes($ociPath) }
             if ($component -ceq 'backend') { $build.dependencies = @(@{ repository = 'owner/hexagon-core-dotnet'; commit = 'c' * 40; version = '1.0.0-dev.1'; packages = @(@{ id = 'Hexagon.Core.Domain'; sha256 = 'd' * 64 }) }); $files['artifacts.json'] = Bytes '{}' }
         }
-        $files['build.json'] = Bytes (ConvertTo-PlatformBootstrapJson $build)
+        $files['build.json'] = Bytes (ConvertTo-CanonicalJson $build)
         $zip = Join-Path $temporary "$component.zip"; Write-Zip $zip $files
         $candidate = @{ runId = $counter; runAttempt = 1; artifactId = $counter + 100; archiveSha256 = Get-LifecycleFileHash $zip }; $delivery.candidates[$component] = $candidate
         $prefix = $(if ($component -ceq 'devops') { 'operations' } else { $component })
         $run = @{ id = $candidate.runId; run_attempt = 1; status = 'completed'; conclusion = 'success'; event = 'workflow_dispatch'; path = '.github/workflows/ci.yml'; head_branch = 'main'; head_sha = $source.commit; repository = @{ full_name = $source.repository; id = $counter }; head_repository = @{ id = $counter } }
         $artifact = @{ id = $candidate.artifactId; name = "$prefix-$($source.commit)-$counter-1"; expired = $false; size_in_bytes = (Get-Item $zip).Length; digest = "sha256:$($candidate.archiveSha256)"; workflow_run = @{ id = $counter; repository_id = $counter; head_repository_id = $counter; head_branch = 'main'; head_sha = $source.commit } }
         $base = "https://api.github.com/repos/$($source.repository)/actions"
-        $handler.Route('GET', "$base/runs/$counter/attempts/1", 200, (Bytes (ConvertTo-PlatformBootstrapJson $run)))
-        $handler.Route('GET', "$base/artifacts/$($candidate.artifactId)", 200, (Bytes (ConvertTo-PlatformBootstrapJson $artifact)))
+        $handler.Route('GET', "$base/runs/$counter/attempts/1", 200, (Bytes (ConvertTo-CanonicalJson $run)))
+        $handler.Route('GET', "$base/artifacts/$($candidate.artifactId)", 200, (Bytes (ConvertTo-CanonicalJson $artifact)))
         $handler.Route('GET', "$base/artifacts/$($candidate.artifactId)/zip", 302, (Bytes ''))
         $handler.Header('GET', "$base/artifacts/$($candidate.artifactId)/zip", 'Location', "https://fixture.blob.core.windows.net/download/$component.zip?signature=fixture")
         $handler.Route('GET', "https://fixture.blob.core.windows.net/download/$component.zip?signature=fixture", 200, [IO.File]::ReadAllBytes($zip))
     }
     $env:GH_TOKEN = 'fixture-local-token'; $env:HEXAGON_ARTIFACTS_READ_TOKEN = 'fixture-cross-repository-token'; $env:GITHUB_REPOSITORY = $release.artifacts.databaseBootstrap.repository
-    $components = Receive-ApplicationCandidates $delivery $release 'fixture123.azurecr.io' (Join-Path $temporary 'received') -Confirm:$false
-    $webOnly = Receive-ApplicationCandidates $delivery $release 'fixture123.azurecr.io' (Join-Path $temporary 'web-only') -ComponentNames web -Confirm:$false
+    $imageTarget = { param($reference) Get-AzureDeliveryImageTarget $reference 'fixture123.azurecr.io' }
+    $components = Receive-ApplicationCandidates $delivery $release $imageTarget (Join-Path $temporary 'received') -Confirm:$false
+    $webOnly = Receive-ApplicationCandidates $delivery $release $imageTarget (Join-Path $temporary 'web-only') -ComponentNames web -Confirm:$false
     Assert-True ($webOnly.Count -eq 1 -and $webOnly.ContainsKey('web')) 'Web publication required backend/operations candidates again.'
     Assert-True ($components.Count -eq 3 -and $components.backend.images['example-api'].target.digest -ceq "sha256:$manifestHash") 'Candidate retrieval lost the verified image identity.'
     for ($i = 0; $i -lt $handler.Requests.Count; $i++) {
         if ($handler.Requests[$i] -like '*fixture.blob*') { Assert-True (-not $handler.Headers[$i].ContainsKey('Authorization')) 'GitHub credential followed the signed redirect.' }
     }
     $handler.Route('GET', 'https://fixture.blob.core.windows.net/download/backend.zip?signature=fixture', 200, (Bytes 'tampered-download'))
-    Assert-Rejected { Receive-ApplicationCandidates $delivery $release 'fixture123.azurecr.io' (Join-Path $temporary 'tampered-download') -Confirm:$false } 'archiveMismatch'
+    Assert-Rejected { Receive-ApplicationCandidates $delivery $release $imageTarget (Join-Path $temporary 'tampered-download') -Confirm:$false } 'archiveMismatch'
     $handler.Route('GET', 'https://fixture.blob.core.windows.net/download/backend.zip?signature=fixture', 200, [IO.File]::ReadAllBytes((Join-Path $temporary 'backend.zip')))
     $downloadUri = "https://api.github.com/repos/$($release.sources[1].repository)/actions/artifacts/$($delivery.candidates.backend.artifactId)/zip"
     $handler.Header('GET', $downloadUri, 'Location', 'https://foreign.example.test/archive.zip')
-    Assert-Rejected { Receive-ApplicationCandidates $delivery $release 'fixture123.azurecr.io' (Join-Path $temporary 'foreign-download') -Confirm:$false } 'archiveRedirectInvalid'
+    Assert-Rejected { Receive-ApplicationCandidates $delivery $release $imageTarget (Join-Path $temporary 'foreign-download') -Confirm:$false } 'archiveRedirectInvalid'
     Assert-True (@($handler.Requests | Where-Object { $_ -like '*foreign.example.test*' }).Count -eq 0) 'Untrusted archive host was requested.'
     $handler.Header('GET', $downloadUri, 'Location', 'https://fixture.blob.core.windows.net/download/backend.zip?signature=fixture')
     $bad = Copy-Value $release; $bad.sources[0].manifests[0].sha256 = 'f' * 64
-    Assert-Rejected { Test-DeliveryComponent $components.web.directory $bad web 'fixture123.azurecr.io' } 'manifestMismatch'
+    Assert-Rejected { Test-DeliveryComponent $components.web.directory $bad web $imageTarget } 'manifestMismatch'
     $bad = Copy-Value $release; $bad.artifacts.backend['example-api'] = "source.example.test/product/api@sha256:$('0' * 64)"
-    Assert-Rejected { Test-DeliveryComponent $components.backend.directory $bad backend 'fixture123.azurecr.io' } 'imageMismatch'
+    Assert-Rejected { Test-DeliveryComponent $components.backend.directory $bad backend $imageTarget } 'imageMismatch'
     $bad = Copy-Value $release; $bad.artifacts.web.sha256 = '0' * 64
-    Assert-Rejected { Test-DeliveryComponent $components.web.directory $bad web 'fixture123.azurecr.io' } 'webMismatch'
+    Assert-Rejected { Test-DeliveryComponent $components.web.directory $bad web $imageTarget } 'webMismatch'
 
     $inventory = Get-Content -Raw -LiteralPath (Join-Path $repository 'examples/environment-inventory.json') | ConvertFrom-Json -AsHashtable
     $context = @{ inventory = $inventory; prefix = "$($inventory.product)/$($inventory.environment)/$($inventory.instance.id)"; runtime = $temporary; tokens = @{}; leaseId = $null }
@@ -187,7 +188,7 @@ try {
     $jobId = "/subscriptions/$($inventory.target.subscriptionId)/resourceGroups/$($inventory.roots[0].resourceGroup)/providers/Microsoft.App/jobs/example-migrations"
     $expected = @{ name = 'maintenance'; image = $copied.image; args = @('--migrate-only'); environment = @{ AZURE_CLIENT_ID = 'fixture-public-id' }; cpu = 0.5; memory = '1Gi' }
     $job = @{ id = $jobId; properties = @{ configuration = @{ triggerType = 'Manual'; replicaRetryLimit = 0; replicaTimeout = 1800 }; template = Get-Template $expected } }
-    $blobHandler.Route('GET', "https://management.azure.com${jobId}?api-version=2024-03-01", 200, (ConvertTo-PlatformBootstrapJson $job))
+    $blobHandler.Route('GET', "https://management.azure.com${jobId}?api-version=2024-03-01", 200, (ConvertTo-CanonicalJson $job))
     $jobFixture = @{ handler = $blobHandler; id = $jobId; context = $context; expected = $expected; starts = 0; saved = $null; failStart = $false; publishExecution = $true }
     & $maintenanceModule { param($fixture) $script:jobFixture = $fixture
         function script:Invoke-LifecycleCommand {
@@ -202,8 +203,8 @@ try {
             $template = Get-Content -Raw -LiteralPath $body | ConvertFrom-Json -AsHashtable -Depth 32
             if ($script:jobFixture.publishExecution) {
                 $execution = @{ id = "$($script:jobFixture.id)/executions/fixture-execution"; name = 'fixture-execution'; properties = @{ status = 'Succeeded'; template = $template } }
-                $script:jobFixture.handler.Route('GET', "https://management.azure.com$($script:jobFixture.id)/executions?api-version=2024-03-01", 200, (ConvertTo-PlatformBootstrapJson @{ value = @($execution) }))
-                $script:jobFixture.handler.Route('GET', "https://management.azure.com$($execution.id)?api-version=2024-03-01", 200, (ConvertTo-PlatformBootstrapJson $execution))
+                $script:jobFixture.handler.Route('GET', "https://management.azure.com$($script:jobFixture.id)/executions?api-version=2024-03-01", 200, (ConvertTo-CanonicalJson @{ value = @($execution) }))
+                $script:jobFixture.handler.Route('GET', "https://management.azure.com$($execution.id)?api-version=2024-03-01", 200, (ConvertTo-CanonicalJson $execution))
             }
             return @{ exitCode = $(if ($script:jobFixture.failStart) { 1 } else { 0 }); text = '{}' }
         }
@@ -239,8 +240,8 @@ try {
             Auth__Authority = 'https://auth.example.test'; Auth__Audience = 'fixture-api'; Auth__ApiScope = 'fixture.access' } }
     $job.properties.template = Get-Template $fullExpected
     $job.identity = @{ type = 'UserAssigned'; userAssignedIdentities = @{ $identityId = @{} } }
-    $blobHandler.Route('GET', "https://management.azure.com${jobId}?api-version=2024-03-01", 200, (ConvertTo-PlatformBootstrapJson $job))
-    $blobHandler.Route('GET', "https://management.azure.com${identityId}?api-version=2023-01-31", 200, (ConvertTo-PlatformBootstrapJson @{ properties = @{ clientId = $bootstrap.clientId } }))
+    $blobHandler.Route('GET', "https://management.azure.com${jobId}?api-version=2024-03-01", 200, (ConvertTo-CanonicalJson $job))
+    $blobHandler.Route('GET', "https://management.azure.com${identityId}?api-version=2023-01-31", 200, (ConvertTo-CanonicalJson @{ properties = @{ clientId = $bootstrap.clientId } }))
     $fullHosting = @{ inputs = $fullInputs; state = @{ outputs = @{ database_bootstrap = $bootstrap; maintenance_jobs = @{ migrations = @{ id = $jobId } } }
             resources = @(@{ type = 'azurerm_container_app_job'; id = $jobId }, @{ type = 'azurerm_user_assigned_identity'; id = $identityId }) } }
     $spec = & $deliveryModule { param($c, $h) Get-AzureDeliveryJobSpec $c $h migrations } $context $fullHosting
@@ -252,7 +253,7 @@ try {
     $result = & $deliveryModule { param($c, $j, $h) Invoke-AzureDeliveryJob $c $j $h migrations } $context $checkpoint $fullHosting
     $durable = Read-AzureDeliveryJournal $context ('a' * 64)
     Assert-True ($result.status -ceq 'Succeeded' -and $durable.jobs.migrations.status -ceq 'Succeeded') 'Native callback failed to checkpoint a successful maintenance execution.'
-    $blobHandler.Route('GET', "https://management.azure.com${identityId}?api-version=2023-01-31", 200, (ConvertTo-PlatformBootstrapJson @{ properties = @{ clientId = '99999999-9999-9999-9999-999999999999' } }))
+    $blobHandler.Route('GET', "https://management.azure.com${identityId}?api-version=2023-01-31", 200, (ConvertTo-CanonicalJson @{ properties = @{ clientId = '99999999-9999-9999-9999-999999999999' } }))
     Assert-Rejected { & $deliveryModule { param($c, $h) Get-AzureDeliveryJobSpec $c $h migrations } $context $fullHosting } 'maintenanceIdentityInvalid'
 
     # Maintenance evidence is invalidated by any relevant input, messaging state or IaC change.
@@ -373,8 +374,8 @@ try {
 
     # The actual CLI validates tracked metadata and protections in an isolated process scope.
     # Only GitHub reads are replaced; Azure account access must not occur in Validate/WhatIf.
-    # Both providers go through the same entry point; the provider comes from the tracked target.
-    foreach ($case in @(@{ provider = 'azure'; example = 'ephemeral-environment.json' }, @{ provider = 'aws'; example = 'ephemeral-environment-aws.json' })) {
+    # The provider comes from the tracked target, never from the dispatch.
+    foreach ($case in @(@{ provider = 'azure'; example = 'ephemeral-environment.json' })) {
         $source = Join-Path $temporary "source-$($case.provider)"; [IO.Directory]::CreateDirectory($source) | Out-Null
         foreach ($relative in @('scripts', 'contracts/schemas', '.config')) {
             $destination = Join-Path $source $relative; [IO.Directory]::CreateDirectory($destination) | Out-Null
@@ -433,8 +434,7 @@ try {
             }
             $validated = $output -join "`n" | ConvertFrom-Json
             Assert-True ($validated.status -ceq 'Validated' -and $validated.details.githubEnvironment -ceq 'dev-run-12345-1' -and $validated.details.provider -ceq $case.provider) "Delivery CLI did not validate tracked metadata: $($output -join '')"
-            if ($case.provider -ceq 'aws') { Assert-True ($validated.details.accountId -ceq $definition.inventory.target.accountId -and $validated.details.roleArn -ceq $definition.inventory.target.roleArn -and $validated.details.region -ceq $definition.inventory.target.region) 'The AWS target must come from the tracked definition.' }
-            else { Assert-True ($validated.details.clientId -ceq $definition.inventory.target.clientId) 'The Azure target must come from the tracked definition.' }
+            Assert-True ($validated.details.clientId -ceq $definition.inventory.target.clientId) 'The Azure target must come from the tracked definition.'
         }
         finally { $runspace.Dispose() }
     }

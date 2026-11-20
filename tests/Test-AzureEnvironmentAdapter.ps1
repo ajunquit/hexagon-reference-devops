@@ -12,7 +12,7 @@ Import-Module (Join-Path $repository 'scripts/EnvironmentLifecycle.psm1')
 Import-Module (Join-Path $repository 'scripts/EnvironmentSnapshot.psm1')
 Import-Module (Join-Path $repository 'scripts/AzureEnvironmentStore.psm1')
 Import-Module (Join-Path $repository 'scripts/LifecycleNative.psm1')
-Import-Module (Join-Path $repository 'scripts/PlatformBootstrap.psm1')
+Import-Module (Join-Path $repository 'scripts/CanonicalJson.psm1')
 if (-not ('Hexagon.LifecycleTests.LifecycleHttpHandler' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'LifecycleHttpHandler.cs') }
 $parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
 $temporary = Join-Path $parent "hexagon-azure-lifecycle-tests-$([guid]::NewGuid().ToString('N'))"
@@ -24,14 +24,14 @@ function Assert-Rejected([scriptblock] $Action, [string] $Code) {
     catch { Assert-True ($_.Exception.Message -like "*$Code*") "Unexpected rejection: $($_.Exception.Message)"; return }
     throw "Expected rejection: $Code"
 }
-function Copy-Value([object] $Value) { return (ConvertTo-PlatformBootstrapJson $Value) | ConvertFrom-Json -AsHashtable -Depth 64 }
-function Write-Json([string] $Path, [object] $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-PlatformBootstrapJson $Value) + "`n") }
+function Copy-Value([object] $Value) { return (ConvertTo-CanonicalJson $Value) | ConvertFrom-Json -AsHashtable -Depth 64 }
+function Write-Json([string] $Path, [object] $Value) { [IO.File]::WriteAllText($Path, (ConvertTo-CanonicalJson $Value) + "`n") }
 function Invoke-Git([string[]] $Arguments) {
     $result = Invoke-LifecycleCommand git $Arguments $source -TimeoutSeconds 30
     if ($result.exitCode -ne 0) { throw 'Fixture Git command failed.' }
     return $result
 }
-function Set-ArmRoute([string] $Uri, [object] $Value, [int] $Status = 200) { $handler.Route('GET', $Uri, $Status, (ConvertTo-PlatformBootstrapJson $Value)) }
+function Set-ArmRoute([string] $Uri, [object] $Value, [int] $Status = 200) { $handler.Route('GET', $Uri, $Status, (ConvertTo-CanonicalJson $Value)) }
 function Write-Zip([string] $Path, [hashtable] $Files) {
     $zip = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
     try { foreach ($name in $Files.Keys) { $stream = $zip.CreateEntry($name).Open(); try { $stream.Write($Files[$name]) } finally { $stream.Dispose() } } }
@@ -45,7 +45,7 @@ try {
     # A real local Git history proves snapshot trust independently of the storage double.
     $source = Join-Path $temporary 'source'; [IO.Directory]::CreateDirectory($source) | Out-Null
     $inventory = Get-Content -Raw -LiteralPath (Join-Path $repository 'examples/environment-inventory.json') | ConvertFrom-Json -AsHashtable
-    foreach ($prefix in @($inventory.roots | ForEach-Object { Get-SnapshotRootPaths $_.id dev } | Sort-Object -Unique)) {
+    foreach ($prefix in @($inventory.roots | ForEach-Object { Get-SnapshotRootPaths $_.id dev $_.adapter } | Sort-Object -Unique)) {
         $destination = Join-Path $source $prefix; [IO.Directory]::CreateDirectory($destination) | Out-Null
         foreach ($file in Get-ChildItem -LiteralPath (Join-Path $repository $prefix) -File -Force | Where-Object { $_.Name -match '[.]tf$|^[.]terraform[.]lock[.]hcl$' }) { Copy-Item -LiteralPath $file.FullName -Destination $destination }
     }
@@ -77,7 +77,7 @@ try {
     $forgedManifest = Copy-Value $snapshot.manifest
     $forgedFiles['terraform/environments/dev/hosting-azure/main.tf'] = [Text.Encoding]::UTF8.GetBytes('# modified outside trusted Git')
     $forgedManifest.files['terraform/environments/dev/hosting-azure/main.tf'] = Get-LifecycleBytesHash $forgedFiles['terraform/environments/dev/hosting-azure/main.tf']
-    $forgedFiles['manifest.json'] = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $forgedManifest))
+    $forgedFiles['manifest.json'] = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $forgedManifest))
     $forged = Join-Path $temporary 'forged.zip'; Write-Zip $forged $forgedFiles
     $bad = Copy-Value $inventory; $bad.iac.snapshotSha256 = Get-LifecycleFileHash $forged
     Assert-Rejected { Read-LifecycleSnapshot $bad $forged $source $commit } 'snapshotSourceChanged'
@@ -260,7 +260,7 @@ try {
     $env:GITHUB_REF = 'refs/heads/feature'
     Assert-Rejected { Assert-AzureLifecycleRuntime $context } 'trustedWorkflowRequired'
     $env:GITHUB_REF = 'refs/heads/main'
-    $cloudFixture.planJson = ConvertTo-PlatformBootstrapJson @{ format_version = '1.2'; complete = $true; errored = $false; resource_changes = @(@{ mode = 'managed'; address = 'azurerm_virtual_network.fixture'; type = 'azurerm_virtual_network'; change = @{ actions = @('create'); before = $null; after = @{ resource_group_name = $root.resourceGroup } } }) }
+    $cloudFixture.planJson = ConvertTo-CanonicalJson @{ format_version = '1.2'; complete = $true; errored = $false; resource_changes = @(@{ mode = 'managed'; address = 'azurerm_virtual_network.fixture'; type = 'azurerm_virtual_network'; change = @{ actions = @('create'); before = $null; after = @{ resource_group_name = $root.resourceGroup } } }) }
     $plan = New-AzureLifecyclePlan $context $single.roots[0] Create -Confirm:$false
     $review = Add-EnvironmentRootPlan $inventoryPath hosting Create $plan.binaryPath $plan.jsonPath (Get-LifecycleFileHash $inventoryPath) -Confirm:$false
     Save-AzureLifecycleJournal $context $inventoryPath -Confirm:$false | Out-Null
@@ -360,7 +360,7 @@ try {
     Assert-Rejected { New-AzureLifecyclePlan $context $observed.roots[0] Destroy -Confirm:$false } 'ambientConfiguration'
     $env:TF_CLI_ARGS = $null
     $cloudFixture.operation = 'Destroy'
-    $cloudFixture.planJson = ConvertTo-PlatformBootstrapJson @{ format_version = '1.2'; complete = $true; errored = $false; resource_changes = @(@{ mode = 'managed'; address = 'azurerm_virtual_network.fixture'; type = 'azurerm_virtual_network'; change = @{ actions = @('delete'); before = @{ id = $resourceId }; after = $null } }) }
+    $cloudFixture.planJson = ConvertTo-CanonicalJson @{ format_version = '1.2'; complete = $true; errored = $false; resource_changes = @(@{ mode = 'managed'; address = 'azurerm_virtual_network.fixture'; type = 'azurerm_virtual_network'; change = @{ actions = @('delete'); before = @{ id = $resourceId }; after = $null } }) }
     $plan = New-AzureLifecyclePlan $context $observed.roots[0] Destroy -Confirm:$false
     $review = Add-EnvironmentRootPlan $inventoryPath hosting Destroy $plan.binaryPath $plan.jsonPath (Get-LifecycleFileHash $inventoryPath) -Confirm:$false
     Save-AzureLifecycleJournal $context $inventoryPath -Confirm:$false | Out-Null

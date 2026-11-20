@@ -2,30 +2,42 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentLifecycle.psm1')
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentSnapshot.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.Execution.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
-Import-Module (Join-Path $PSScriptRoot 'AwsEphemeralEnvironment.psm1')
+Import-Module (Join-Path $PSScriptRoot 'ContractSchemas.psm1')
+
+# The reservation of each cloud (docs/separacion-por-nube.md): a module named <Cloud>EphemeralEnvironment.psm1
+# next to this one recognizes its target and implements the Ephemeral* contract functions inside it.
+$script:clouds = $null
+
+function Get-EphemeralClouds {
+    if ($null -eq $script:clouds) {
+        $script:clouds = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*EphemeralEnvironment.psm1' -File | Where-Object Name -CNE 'EphemeralEnvironment.psm1' |
+            Sort-Object Name | ForEach-Object { Import-Module $_.FullName -PassThru -DisableNameChecking })
+    }
+    return $script:clouds
+}
+
+function Get-EphemeralCloud([hashtable] $Target) {
+    $matching = @(Get-EphemeralClouds | Where-Object { & $_ { param($target) Test-EphemeralCloudTarget $target } $Target })
+    if ($matching.Count -ne 1) { throw 'lifecycle.cloud.targetUnsupported' }
+    return $matching[0]
+}
+
+function Invoke-EphemeralCloud([Management.Automation.PSModuleInfo] $Cloud, [string] $Name, [object[]] $Arguments = @()) {
+    return & $Cloud { param($command, $values) & $command @values } $Name $Arguments
+}
 
 function Read-EphemeralEnvironment([string] $Path) {
     $root = Split-Path -Parent $PSScriptRoot
     if ((Get-Item -LiteralPath $Path).Length -gt 4194304 -or (Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'lifecycle.ephemeral.definitionInvalid' }
     $json = Get-Content -Raw -LiteralPath $Path
-    if (-not ($json | Test-Json -SchemaFile (Join-Path $root 'contracts/schemas/ephemeral-environment-v1.schema.json') -ErrorAction SilentlyContinue)) { throw 'lifecycle.ephemeral.definitionInvalid' }
+    if (-not (Test-ContractJson $json ephemeral-environment-v1)) { throw 'lifecycle.ephemeral.definitionInvalid' }
     $value = $json | ConvertFrom-Json -AsHashtable -Depth 32
     Assert-EnvironmentInitialInventory $value.inventory
     $inventory = $value.inventory
     if ($inventory.components.Count -ne 2 -or $inventory.components -cnotcontains 'web' -or $inventory.components -cnotcontains 'backend') { throw 'lifecycle.ephemeral.referenceComponentsUnsupported' }
-    if ($inventory.target.ContainsKey('accountId')) { Assert-AwsEphemeralDefinition $value; return $value }
-    if ($inventory.instance.kind -cne 'Ephemeral' -or $inventory.environment -ceq 'prod' -or $inventory.dataPolicy -cne 'DeleteEphemeral' -or
-        $inventory.target.container -cne "tfstate-$($inventory.instance.id)-$($inventory.environment)" -or $value.bootstrapContainer -ceq $inventory.target.container -or
-        ($value.oidcPrefix -replace '^repo:', '' -replace '@[0-9]+', '') -cne $inventory.iac.repository -or
-        "id-$($inventory.product)-$($inventory.environment)-$($inventory.instance.id)-deploy".Length -gt 128) { throw 'lifecycle.ephemeral.boundaryInvalid' }
-    if ($value.protectedResourceGroups -cnotcontains $inventory.target.stateResourceGroup -or
-        @($value.protectedResourceGroups | Where-Object { -not $_.StartsWith("rg-$($inventory.product)-", [StringComparison]::Ordinal) -or $_ -cin $inventory.roots.resourceGroup }).Count -gt 0) { throw 'lifecycle.ephemeral.protectedScopeInvalid' }
-    foreach ($environment in @('dev', 'staging', 'prod')) {
-        $prefix = "rg-$($inventory.product)-$environment"
-        if (@($value.protectedResourceGroups | Where-Object { ($_ -ceq $prefix -or $_.StartsWith("$prefix-", [StringComparison]::Ordinal)) -and -not $_.StartsWith("$prefix-run-", [StringComparison]::Ordinal) }).Count -eq 0) { throw 'lifecycle.ephemeral.protectedScopeInvalid' }
-    }
+    Invoke-EphemeralCloud (Get-EphemeralCloud $inventory.target) Assert-EphemeralCloudDefinition @(, $value)
     return $value
 }
 
@@ -68,8 +80,17 @@ function New-EphemeralWorkspace {
 }
 
 function Invoke-EphemeralGithub([string] $Method, [string] $Path, [object] $Body) {
-    $module = Get-Module PlatformBootstrap.Execution
-    return & $module { param($m, $p, $b) Invoke-BootstrapApi $m $p $b } $Method $Path $Body
+    if ($Method -cnotin @('GET', 'PUT', 'POST', 'PATCH')) { throw 'lifecycle.ephemeral.githubFailed' }
+    $arguments = @('api', '--method', $Method, $Path, '-H', 'X-GitHub-Api-Version: 2026-03-10')
+    $PSNativeCommandUseErrorActionPreference = $false
+    try {
+        if ($null -ne $Body) { $output = (ConvertTo-CanonicalJson $Body) | & gh @arguments --input - 2>&1 }
+        else { $output = & gh @arguments 2>&1 }
+        if ($LASTEXITCODE -ne 0) { throw 'native' }
+    }
+    catch { throw 'lifecycle.ephemeral.githubFailed' }
+    $text = ($output | ForEach-Object ToString) -join "`n"
+    if ($text.Trim()) { return $text | ConvertFrom-Json -AsHashtable -Depth 64 }
 }
 
 function Assert-EphemeralRepository([hashtable] $Definition) {
@@ -83,9 +104,7 @@ function Assert-EphemeralRepository([hashtable] $Definition) {
 
 # The variables a GitHub Environment holds for the federated deployment identity of its cloud.
 function Get-EphemeralGithubBindings([hashtable] $Definition) {
-    if ($Definition.inventory.target.ContainsKey('accountId')) { return Get-AwsEphemeralGithubBindings $Definition }
-    $target = $Definition.inventory.target
-    return [ordered] @{ AZURE_CLIENT_ID = $target.clientId; AZURE_TENANT_ID = $target.tenantId; AZURE_SUBSCRIPTION_ID = $target.subscriptionId }
+    return Invoke-EphemeralCloud (Get-EphemeralCloud $Definition.inventory.target) Get-EphemeralCloudGithubBindings @(, $Definition)
 }
 
 function Get-EphemeralGithubProtection {
@@ -171,46 +190,6 @@ function Assert-EphemeralTrackedDefinition([string] $Path, [string] $Sha256, [st
     return $definition
 }
 
-function Assert-EphemeralReservationPlan([hashtable] $Plan) {
-    if ($Plan.format_version -cnotmatch '^1[.]' -or $Plan.complete -isnot [bool] -or $Plan.complete -ne $true -or $Plan.errored -isnot [bool] -or $Plan.errored -ne $false) { throw 'lifecycle.ephemeral.reservationChangeForbidden' }
-    foreach ($key in @('deferred_changes', 'deferred_action_invocations', 'action_invocations')) { if ($Plan.ContainsKey($key) -and @($Plan[$key]).Count -gt 0) { throw 'lifecycle.ephemeral.reservationChangeForbidden' } }
-    $changes = @()
-    if ($Plan.ContainsKey('resource_changes')) {
-        if ($Plan.resource_changes -isnot [Collections.IList]) { throw 'lifecycle.ephemeral.reservationChangeForbidden' }
-        $changes = $Plan.resource_changes
-    }
-    foreach ($change in $changes) {
-        if ($change.mode -ceq 'data') { continue }
-        if ($change.mode -cne 'managed' -or $change.change.actions -isnot [Collections.IList] -or $change.change.actions.Count -eq 0 -or $change.type -cnotin @('azurerm_resource_group', 'azurerm_storage_container', 'azurerm_user_assigned_identity', 'azurerm_federated_identity_credential', 'azurerm_role_assignment') -or
-            @($change.change.actions | Where-Object { $_ -cnotin @('create', 'no-op') }).Count -gt 0 -or
-            ($change.change.ContainsKey('importing') -and $null -ne $change.change.importing)) { throw 'lifecycle.ephemeral.reservationChangeForbidden' }
-    }
-}
-
-function Assert-EphemeralBootstrapStorage([hashtable] $Definition, [hashtable] $Account, [hashtable] $Properties) {
-    $target = $Definition.inventory.target
-    $id = "/subscriptions/$($target.subscriptionId)/resourceGroups/$($target.stateResourceGroup)/providers/Microsoft.Storage/storageAccounts/$($target.storageAccount)"
-    if ($Account.id -ine $id -or $Account.allowSharedKeyAccess -ne $false -or $Account.allowBlobPublicAccess -ne $false -or $Account.minimumTlsVersion -cne 'TLS1_2' -or
-        $Account.encryption.requireInfrastructureEncryption -ne $true -or $Properties.isVersioningEnabled -ne $true -or $Properties.deleteRetentionPolicy.enabled -ne $true -or
-        $Properties.deleteRetentionPolicy.days -lt 30 -or $Properties.containerDeleteRetentionPolicy.enabled -ne $true -or $Properties.containerDeleteRetentionPolicy.days -lt 30) { throw 'lifecycle.ephemeral.storageNotProtected' }
-}
-
-function Test-EphemeralIsolation([hashtable] $Definition, [scriptblock] $Read) {
-    $inventory = $Definition.inventory
-    foreach ($group in $Definition.protectedResourceGroups) {
-        $status = & $Read "https://management.azure.com/subscriptions/$($inventory.target.subscriptionId)/resourceGroups/$group`?api-version=2024-03-01" $false
-        if ($status -ne 403) { throw 'lifecycle.ephemeral.isolationNotVerified' }
-    }
-    $hostUrl = "https://$($inventory.target.storageAccount).blob.core.windows.net"
-    $status = & $Read "$hostUrl/$($inventory.target.container)?restype=container&comp=list&maxresults=1" $true
-    if ($status -ne 200) { throw 'lifecycle.ephemeral.isolationNotVerified' }
-    foreach ($name in @($Definition.bootstrapContainer) + @('dev', 'staging', 'prod' | ForEach-Object { "$($Definition.bootstrapContainer)-$_" })) {
-        $status = & $Read "$hostUrl/$name`?restype=container&comp=list&maxresults=1" $true
-        if ($status -ne 403) { throw 'lifecycle.ephemeral.isolationNotVerified' }
-    }
-    return @{ apiVersion = 'hexagon.ec/ephemeral-isolation-result/v1'; status = 'Verified'; instanceId = $inventory.instance.id; applicationVerified = $false }
-}
-
 function Assert-EphemeralReservationReview([hashtable] $Review, [string] $Sha256, [string] $DefinitionSha256, [string] $SourceSha256, [string] $Directory) {
     $names = @('main.tf', 'providers.tf', 'variables.tf', 'outputs.tf', 'versions.tf', '.terraform.lock.hcl', 'terraform.rc', 'backend.json', 'inputs.tfvars.json', 'reservation.tfplan', 'reservation.json')
     if ($Sha256 -cnotmatch '^[0-9a-f]{64}$' -or (Get-SnapshotHash $Review) -cne $Sha256 -or $Review.definitionSha256 -cne $DefinitionSha256 -or
@@ -219,4 +198,4 @@ function Assert-EphemeralReservationReview([hashtable] $Review, [string] $Sha256
     foreach ($name in $names) { if ((Get-LifecycleFileHash (Join-Path $Directory $name)) -cne $Review.files[$name]) { throw 'lifecycle.ephemeral.reviewChanged' } }
 }
 
-Export-ModuleMember -Function Read-EphemeralEnvironment, Get-EphemeralGithubBindings, Assert-EphemeralSelection, New-EphemeralWorkspace, Resolve-EphemeralWorkspacePath, Invoke-EphemeralGithub, Assert-EphemeralRepository, Get-EphemeralGithubProtection, Set-EphemeralGithubProtection, Assert-EphemeralTrackedDefinition, Assert-EphemeralReservationPlan, Assert-EphemeralReservationReview, Assert-EphemeralBootstrapStorage, Test-EphemeralIsolation
+Export-ModuleMember -Function Read-EphemeralEnvironment, Get-EphemeralGithubBindings, Assert-EphemeralSelection, New-EphemeralWorkspace, Resolve-EphemeralWorkspacePath, Invoke-EphemeralGithub, Assert-EphemeralRepository, Get-EphemeralGithubProtection, Set-EphemeralGithubProtection, Assert-EphemeralTrackedDefinition, Assert-EphemeralReservationReview, Get-EphemeralCloud, Invoke-EphemeralCloud

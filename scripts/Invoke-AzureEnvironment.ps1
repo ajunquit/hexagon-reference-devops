@@ -23,7 +23,7 @@ Import-Module (Join-Path $PSScriptRoot 'AzureEnvironmentStore.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'TerraformAzureLifecycle.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'LifecycleNative.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AzureLifecycleInputs.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 $context = $null; $status = 'Blocked'; $details = @{}; $code = $null
 
 function Assert-WorkspacePath([string] $Path) {
@@ -137,7 +137,7 @@ try {
                                 if ($item.id -ceq 'messaging') {
                                     $inputValue = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json -AsHashtable -Depth 32
                                     $inputValue = ConvertTo-AzureMessagingPrincipalInput $inputValue $principals
-                                    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $inputValue) + "`n")
+                                    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $inputValue) + "`n")
                                 }
                                 [IO.File]::WriteAllBytes((Join-Path $directory "$($item.id).tfvars.json"), $bytes)
                             }

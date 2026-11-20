@@ -4,8 +4,8 @@
   "kind": "MessagingOperationsPolicy",
   "product": "hexagon-example",
   "environment": "dev",
-  "provider": "aws-sns-sqs",
-  "notificationTargets": ["arn:aws:sns:us-east-1:000000000000:hexagon-example-dev-alerts"],
+  "provider": "rabbitmq",
+  "notificationTargets": [],
   "operatorIdentities": {
     "worker": "hexagon-example-dev-worker-operations",
     "sales-worker": "hexagon-example-dev-sales-worker-operations"
@@ -15,7 +15,7 @@
       "id": "worker",
       "backlogThreshold": 1000,
       "deadLetterThreshold": null,
-      "oldestMessageAgeSeconds": 300,
+      "oldestMessageAgeSeconds": null,
       "quarantineReviewHours": 0,
       "replay": { "enabled": false, "maxBatchSize": 10, "delayMilliseconds": 500 }
     },
@@ -23,7 +23,7 @@
       "id": "sales-worker",
       "backlogThreshold": 1000,
       "deadLetterThreshold": 1,
-      "oldestMessageAgeSeconds": 300,
+      "oldestMessageAgeSeconds": null,
       "quarantineReviewHours": 24,
       "replay": { "enabled": true, "maxBatchSize": 10, "delayMilliseconds": 500 }
     }

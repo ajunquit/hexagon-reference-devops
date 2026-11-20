@@ -5,8 +5,24 @@ using RabbitMQ.Client;
 
 namespace Hexagon.Messaging.Operations;
 
-internal static class RabbitMqOperations
+internal sealed class RabbitMqOperations : IMessagingProvider
 {
+    public string Name => "rabbitmq";
+
+    public bool Fanout => true;
+
+    public void Validate(OperationTarget target)
+    {
+        if (!OperationTarget.EntityName(target.SourceQueue) || !OperationTarget.EntityName(target.VirtualHost) || !OperationTarget.EntityName(target.Exchange) ||
+            (target.HasDeadLetter && (!OperationTarget.EntityName(target.DeadLetterQueue) || target.SourceQueue == target.DeadLetterQueue)))
+        {
+            throw new InvalidOperationException("Invalid RabbitMQ target.");
+        }
+    }
+
+    Task IMessagingProvider.RunAsync(OperationTarget target, OperationRequest request, CancellationToken cancellationToken) =>
+        RunAsync(target, request, cancellationToken);
+
     public static async Task RunAsync(OperationTarget target, OperationRequest request, CancellationToken cancellationToken)
     {
         var connection = new Uri(System.Environment.GetEnvironmentVariable("HEXAGON_OPERATIONS_CONNECTION_STRING")

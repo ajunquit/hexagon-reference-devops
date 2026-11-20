@@ -16,7 +16,7 @@ internal static class Program
                     request.Limit,
                     target.ReplayEnabled,
                     target.HasDeadLetter,
-                    fanout = target.Provider is "azure-service-bus" or "rabbitmq",
+                    fanout = MessagingProviders.Get(target.Provider).Fanout,
                 });
                 return 0;
             }
@@ -24,12 +24,7 @@ internal static class Program
             using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
             OperationAudit.Write(target, request, "started");
-            switch (target.Provider)
-            {
-                case "azure-service-bus": await AzureOperations.RunAsync(target, request, cancellation.Token); break;
-                case "aws-sns-sqs": await AwsOperations.RunAsync(target, request, cancellation.Token); break;
-                case "rabbitmq": await RabbitMqOperations.RunAsync(target, request, cancellation.Token); break;
-            }
+            await MessagingProviders.Get(target.Provider).RunAsync(target, request, cancellation.Token);
             OperationAudit.Write(target, request, "completed");
             return 0;
         }

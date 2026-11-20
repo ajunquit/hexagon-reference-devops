@@ -22,15 +22,11 @@ if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) {
 $projectName = "$($manifest.product)-local-$($manifest.provider)"
 
 if ($PSCmdlet.ShouldProcess($projectName, 'Stop and remove local messaging containers')) {
-    $previousSqlPassword = [Environment]::GetEnvironmentVariable('MSSQL_SA_PASSWORD', 'Process')
+    $environment = Invoke-LocalMessagingProvider (Get-LocalMessagingProviderModule ([string] $manifest.provider)) Get-LocalMessagingStopEnvironment
+    $previous = @{}
+    foreach ($name in $environment.Keys) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     try {
-        if ([string] $manifest.provider -ceq 'azure-service-bus') {
-            [Environment]::SetEnvironmentVariable(
-                'MSSQL_SA_PASSWORD',
-                'Hexagon!LocalCleanup123',
-                'Process'
-            )
-        }
+        foreach ($name in $environment.Keys) { [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process') }
         & docker compose --project-name $projectName --file $composeFile down --remove-orphans
         if ($LASTEXITCODE -ne 0) {
             throw "Docker Compose could not stop '$projectName'."
@@ -53,6 +49,6 @@ if ($PSCmdlet.ShouldProcess($projectName, 'Stop and remove local messaging conta
         }
     }
     finally {
-        [Environment]::SetEnvironmentVariable('MSSQL_SA_PASSWORD', $previousSqlPassword, 'Process')
+        foreach ($name in $previous.Keys) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') }
     }
 }

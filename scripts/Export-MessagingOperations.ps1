@@ -28,11 +28,8 @@ if ($manifestEntry.Count -ne 1) { throw 'Exactly one backend messaging manifest 
 $validated = Get-ValidatedApplicationManifest -Repository $backend[0].repository -Commit $backend[0].commit `
     -Path $manifestEntry[0].path -ExpectedProduct $descriptorModel.product -ExpectedComponent 'backend'
 if ($validated.Sha256 -cne $manifestEntry[0].sha256) { throw 'Backend manifest SHA-256 mismatch.' }
-$providerModule = switch ($operations.provider) {
-    'azure-service-bus' { 'AzureServiceBus' }
-    'aws-sns-sqs' { 'AwsSnsSqs' }
-    'rabbitmq' { 'RabbitMq' }
-}
+$provider = Get-OperationsProviderModule $operations.provider
+$providerModule = Invoke-OperationsProvider $provider Get-OperationsContracts
 Import-Module (Join-Path $PSScriptRoot "$($providerModule)Contracts.psm1") -Force
 # Reuse the full provider checks, including exact routing, workload and product correspondence.
 $inputModel = & "ConvertTo-$($providerModule)TerraformInput" -Descriptor $descriptorModel -Policy $topology -Manifest $validated.Manifest
@@ -44,11 +41,7 @@ if ($operations.provider -ceq 'rabbitmq') {
 
 if ($TerraformOutputs) {
     $outputs = Get-Content -Raw -LiteralPath $TerraformOutputs | ConvertFrom-Json
-    $mapping = switch ($operations.provider) {
-        'azure-service-bus' { $outputs.azure_service_bus.value }
-        'aws-sns-sqs' { $outputs.aws_sns_sqs.value }
-        'rabbitmq' { $outputs.messaging_topology.value }
-    }
+    $mapping = Invoke-OperationsProvider $provider Get-OperationsTerraformMapping @(, $outputs)
     foreach ($consumer in $operations.consumers) {
         $physical = $inputModel.consumers[$consumer.id]
         $actual = $mapping.consumers.($consumer.id)
@@ -66,51 +59,7 @@ if ($TerraformOutputs) {
             maxBatchSize = $consumer.replay.maxBatchSize
             delayMilliseconds = $consumer.replay.delayMilliseconds
         }
-        switch ($operations.provider) {
-            'azure-service-bus' {
-                if ($mapping.namespace.name -cne $topology.namespace.name -or $actual.topic_name -cne $destination.name) {
-                    throw 'Terraform namespace or topic differs from the validated topology.'
-                }
-                $target.namespace = "$($topology.namespace.name).servicebus.windows.net"
-                $target.topic = $destination.name
-                $target.subscription = $physical.name
-                $target.hasDeadLetter = $true
-            }
-            'aws-sns-sqs' {
-                $target.region = $topology.region
-                $target.sourceQueue = $actual.url
-                $target.hasDeadLetter = $physical.redrive.enabled
-                $target.deadLetterQueue = if ($physical.redrive.enabled) { $actual.dead_letter_queue.url } else { '' }
-                if ($actual.arn -cnotmatch "^arn:aws[a-z-]*:sqs:$([regex]::Escape($topology.region)):([0-9]{12}):$([regex]::Escape($physical.name))$") {
-                    throw 'Terraform source queue ARN differs from the validated topology.'
-                }
-                $account = $Matches[1]
-                if ($physical.redrive.enabled -and ($actual.dead_letter_queue.name -cne $physical.redrive.dead_letter_queue_name -or
-                    $actual.dead_letter_queue.arn -cne "arn:$(([string] $actual.arn).Split(':')[1]):sqs:$($topology.region):${account}:$($physical.redrive.dead_letter_queue_name)")) {
-                    throw 'Terraform dead-letter queue differs from the validated topology.'
-                }
-                $queueUrls = @(@{ Url = $target.sourceQueue; Name = $actual.name })
-                if ($physical.redrive.enabled) { $queueUrls += @{ Url = $target.deadLetterQueue; Name = $actual.dead_letter_queue.name } }
-                foreach ($queue in $queueUrls) {
-                    $uri = [uri] $queue.Url
-                    if ($uri.Scheme -cne 'https' -or $uri.Host -cne "sqs.$($topology.region).amazonaws.com" -or
-                        $uri.AbsolutePath -cne "/$account/$($queue.Name)" -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) {
-                        throw 'Terraform queue URL differs from its validated region, account or name.'
-                    }
-                }
-            }
-            'rabbitmq' {
-                if ($mapping.virtual_host -cne $topology.virtualHost) { throw 'Terraform virtual host differs from topology.' }
-                $target.virtualHost = $topology.virtualHost
-                $target.sourceQueue = $physical.name
-                $target.exchange = $destination.name
-                $target.hasDeadLetter = $physical.dead_letter.enabled
-                $target.deadLetterQueue = if ($physical.dead_letter.enabled) { $actual.dead_letter.queue_name } else { '' }
-                if ($physical.dead_letter.enabled -and $target.deadLetterQueue -cne $physical.dead_letter.queue_name) {
-                    throw 'Terraform dead-letter queue differs from the validated topology.'
-                }
-            }
-        }
+        Invoke-OperationsProvider $provider Set-OperationsTarget @($target, $topology, $physical, $actual, $destination, $mapping)
         $artifacts["$($consumer.id).target.json"] = $target
     }
 }

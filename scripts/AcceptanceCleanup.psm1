@@ -1,8 +1,9 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('EnvironmentLifecycle', 'EnvironmentSnapshot', 'AzureEnvironmentStore', 'TerraformAzureLifecycle')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
+foreach ($name in @('EnvironmentLifecycle', 'EnvironmentSnapshot')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
 
 function Get-AcceptanceBinding([hashtable] $Inventory) {
+    $rules = Get-EnvironmentRules $Inventory
     return Get-SnapshotHash @{
         product = $Inventory.product; environment = $Inventory.environment; instance = $Inventory.instance
         target = $Inventory.target; iac = $Inventory.iac; releaseSha256 = $Inventory.releaseSha256
@@ -10,8 +11,9 @@ function Get-AcceptanceBinding([hashtable] $Inventory) {
         roots = @($Inventory.roots | Sort-Object id | ForEach-Object {
             $binding = @{ id = $_.id; adapter = $_.adapter; dependsOn = $_.dependsOn
                 stateKey = $_.stateKey; configurationSha256 = $_.configurationSha256; inputsSha256 = $_.inputsSha256 }
-            # AWS roots are scoped by their short prefix (ADR 0025); Azure keeps its resource group.
-            if ($_.ContainsKey('namePrefix')) { $binding.namePrefix = $_.namePrefix } else { $binding.resourceGroup = $_.resourceGroup }
+            # Each cloud names the scope of its roots (its environment rules).
+            $scope = Invoke-EnvironmentRules $rules Get-EnvironmentRulesRootBinding @(, $_)
+            foreach ($key in $scope.Keys) { $binding[$key] = $scope[$key] }
             $binding
         })
     }
@@ -58,7 +60,7 @@ function Assert-AcceptanceDestroyPlan([hashtable] $Inventory, [hashtable] $Root,
         foreach ($change in $Plan.resource_changes) {
             if ($change.mode -ceq 'data') { continue }
             if (-not $change.change.ContainsKey('before') -or $null -eq $change.change.before -or -not $change.change.before.ContainsKey('id')) { throw 'lifecycle.acceptance.deleteUnapproved' }
-            # The inventory records AWS resources as aws:<account>:<region>:<type>:<id> (ADR 0025).
+            # The inventory records the identifier that the rules of its cloud qualify.
             $id = ConvertTo-LifecycleResourceId $Inventory $change.type ([string] $change.change.before.id)
             if (@($owned | Where-Object { $_.id -ieq $id -and $_.address -ceq $change.address -and $_.type -ceq $change.type }).Count -ne 1) { throw 'lifecycle.acceptance.deleteUnapproved' }
             $observed += $id.ToLowerInvariant()
@@ -67,29 +69,4 @@ function Assert-AcceptanceDestroyPlan([hashtable] $Inventory, [hashtable] $Root,
     if ((($observed | Sort-Object) -join ',') -cne ((@($owned.id | ForEach-Object ToLowerInvariant) | Sort-Object) -join ',')) { throw 'lifecycle.acceptance.deleteSetIncomplete' }
 }
 
-function Invoke-AcceptanceCleanup {
-    [CmdletBinding(SupportsShouldProcess = $true)]
-    param([hashtable] $Context, [hashtable] $Consent, [string] $Workspace)
-    if (-not $PSCmdlet.ShouldProcess($Context.prefix, 'Retire only the pre-reviewed ephemeral resource set')) { return }
-    $inventoryPath = Join-Path $Workspace 'inventory.json'
-    Invoke-AzureLifecycleQuiesce $Context -Confirm:$false | Out-Null
-    foreach ($id in @(Get-EnvironmentRootOrder $Context.inventory Destroy)) {
-        $Context.inventory = Read-EnvironmentInventory $inventoryPath
-        $root = @($Context.inventory.roots | Where-Object id -CEQ $id)[0]
-        $plan = New-AzureLifecyclePlan $Context $root Destroy -Confirm:$false
-        $json = Get-Content -Raw -LiteralPath $plan.jsonPath | ConvertFrom-Json -AsHashtable -Depth 100
-        Assert-AcceptanceDestroyPlan $Context.inventory $root $Consent $json
-        $hash = Add-EnvironmentRootPlan $inventoryPath $id Destroy $plan.binaryPath $plan.jsonPath (Get-LifecycleFileHash $inventoryPath) -Confirm:$false
-        Publish-AzureLifecycleObject $Context "$($Context.prefix)/plans/$hash/$id.tfplan" ([IO.File]::ReadAllBytes($plan.binaryPath)) (Get-LifecycleFileHash $plan.binaryPath) -Confirm:$false
-        Publish-AzureLifecycleObject $Context "$($Context.prefix)/plans/$hash/$id.json" ([IO.File]::ReadAllBytes($plan.jsonPath)) (Get-LifecycleFileHash $plan.jsonPath) -Confirm:$false
-        Save-AzureLifecycleJournal $Context $inventoryPath | Out-Null
-        $Context.inventory = Read-EnvironmentInventory $inventoryPath
-        $port = New-AzureLifecyclePort $Context
-        $confirmation = "DESTROY $($Context.inventory.product) $($Context.inventory.environment) $($Context.inventory.instance.id)"
-        Invoke-EnvironmentRootOperation $inventoryPath $id $plan.binaryPath $plan.jsonPath $hash $confirmation $port -Confirm:$false | Out-Null
-    }
-    $Context.inventory = Read-EnvironmentInventory $inventoryPath
-    if (@($Context.inventory.roots | Where-Object status -CNE 'Destroyed').Count -ne 0) { throw 'lifecycle.acceptance.cleanupIncomplete' }
-}
-
-Export-ModuleMember -Function New-AcceptanceConsent, Assert-AcceptanceConsent, Assert-AcceptanceDestroyPlan, Invoke-AcceptanceCleanup
+Export-ModuleMember -Function New-AcceptanceConsent, Assert-AcceptanceConsent, Assert-AcceptanceDestroyPlan

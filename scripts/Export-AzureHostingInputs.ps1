@@ -11,6 +11,7 @@ $outputPath = [IO.Path]::GetFullPath($Output)
 if (-not $outputPath.EndsWith('.auto.tfvars.json', [StringComparison]::Ordinal)) { throw 'Output must end with .auto.tfvars.json.' }
 if (-not $PSCmdlet.ShouldProcess($outputPath, 'Verify pinned sources and export hosting inputs')) { return }
 Import-Module (Join-Path $PSScriptRoot 'HostingContracts.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AzureHostingContracts.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'ApplicationContracts.psm1') -Force
 & (Join-Path $PSScriptRoot 'Test-ApplicationRelease.ps1') -Descriptor $Descriptor -Release $Release -VerifySources
 $descriptorModel = Get-Content -Raw -LiteralPath $Descriptor | ConvertFrom-Json -AsHashtable

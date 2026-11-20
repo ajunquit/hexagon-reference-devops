@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'EphemeralEnvironment.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 
 function Invoke-WorkflowPort([scriptblock] $Port, [string] $Action) {
     $result = & $Port $Action
@@ -35,12 +35,12 @@ function Invoke-EphemeralStage {
     else {
         $remote = $probe.inventory
         foreach ($field in @('product', 'environment')) { if ($remote[$field] -cne $inventory[$field]) { throw 'lifecycle.selectionMismatch' } }
-        if ((ConvertTo-PlatformBootstrapJson $remote.target) -cne (ConvertTo-PlatformBootstrapJson $inventory.target) -or
-            (ConvertTo-PlatformBootstrapJson $remote.instance) -cne (ConvertTo-PlatformBootstrapJson $inventory.instance) -or
+        if ((ConvertTo-CanonicalJson $remote.target) -cne (ConvertTo-CanonicalJson $inventory.target) -or
+            (ConvertTo-CanonicalJson $remote.instance) -cne (ConvertTo-CanonicalJson $inventory.instance) -or
             (@($remote.roots.id | Sort-Object) -join ',') -cne (@($inventory.roots.id | Sort-Object) -join ',')) { throw 'lifecycle.selectionMismatch' }
         if ($Operation -ceq 'Create') {
             if ($remote.iac.commit -cne $inventory.iac.commit -or $remote.iac.repository -cne $inventory.iac.repository -or $remote.descriptorSha256 -cne $inventory.descriptorSha256 -or $remote.releaseSha256 -cne $inventory.releaseSha256 -or
-                (ConvertTo-PlatformBootstrapJson $remote.components) -cne (ConvertTo-PlatformBootstrapJson $inventory.components)) { throw 'lifecycle.ephemeral.creationContextChanged' }
+                (ConvertTo-CanonicalJson $remote.components) -cne (ConvertTo-CanonicalJson $inventory.components)) { throw 'lifecycle.ephemeral.creationContextChanged' }
             if (@($remote.roots | Where-Object status -CNE 'Destroyed').Count -eq 0) { throw 'lifecycle.ephemeral.instanceRetired' }
         }
         Invoke-WorkflowPort $Port 'Restore' | Out-Null

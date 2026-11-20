@@ -58,7 +58,7 @@ descriptor.
 
 La fase 9A añade `-IncludeBackendHosting` al generador para fijar también
 `BackendHostingRequirements` v1. `ApplicationRelease` v1 registra aparte digests de imágenes y
-checksum del bundle, preservando las fuentes de este descriptor. La [guía de hosting](hosting-azure.md)
+checksum del bundle, preservando las fuentes de este descriptor. La guía de hosting de cada nube
 explica la validación conjunta; los valores de los ejemplos no son desplegables.
 
 - Un campo opcional compatible puede añadirse a v1.

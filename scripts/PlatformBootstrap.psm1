@@ -1,24 +1,10 @@
 Set-StrictMode -Version Latest
 $script:parserBuilt = $false
 
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
+
 function Get-BootstrapHash([string] $Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-
-function ConvertTo-PlatformBootstrapJson {
-    param([Parameter(Mandatory)][object] $Value)
-    function ConvertTo-CanonicalValue($Item) {
-        if ($Item -is [Collections.IDictionary]) {
-            $map = [ordered] @{}
-            foreach ($key in @($Item.Keys | Sort-Object -CaseSensitive)) { $map[$key] = ConvertTo-CanonicalValue $Item[$key] }
-            return $map
-        }
-        if ($Item -is [Collections.IEnumerable] -and $Item -isnot [string]) {
-            return ,@($Item | ForEach-Object { ConvertTo-CanonicalValue $_ })
-        }
-        return $Item
-    }
-    return (ConvertTo-CanonicalValue $Value) | ConvertTo-Json -Depth 32
 }
 
 function Get-BootstrapEnvironments([hashtable] $Definition) {
@@ -292,4 +278,4 @@ function New-PlatformBootstrapPlan {
     return New-PlatformBootstrapResult -Mode Plan -Status $status -Parsed $Parsed -Checks @($checks) -Operations @($operations)
 }
 
-Export-ModuleMember -Function Read-PlatformBootstrapDefinition, Read-PlatformBootstrapDocument, New-PlatformBootstrapResult, Get-PlatformBootstrapObservation, New-PlatformBootstrapPlan, ConvertTo-PlatformBootstrapJson, Get-BootstrapEnvironments
+Export-ModuleMember -Function Read-PlatformBootstrapDefinition, Read-PlatformBootstrapDocument, New-PlatformBootstrapResult, Get-PlatformBootstrapObservation, New-PlatformBootstrapPlan, Get-BootstrapEnvironments

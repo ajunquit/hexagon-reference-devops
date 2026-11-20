@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Narrows the cloud definitions of application-delivery-result-v1.schema.json for Azure; scripts/ContractSchemas.psm1 composes them.",
+  "$defs": {
+    "cloudDetails": {
+      "properties": {
+        "provider": { "const": "azure" },
+        "clientId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+        "tenantId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+        "subscriptionId": { "type": "string", "pattern": "^[0-9a-f-]{36}$" }
+      }
+    }
+  }
+}

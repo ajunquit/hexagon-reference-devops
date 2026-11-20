@@ -7,7 +7,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
-foreach ($name in @('StaticWebPublication', 'AzureWebDelivery', 'AzureEnvironmentStore', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'PlatformBootstrap', 'StaticWebClient')) { Import-Module (Join-Path $repository "scripts/$name.psm1") }
+foreach ($name in @('StaticWebPublication', 'AzureWebDelivery', 'AzureEnvironmentStore', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'CanonicalJson', 'StaticWebClient', 'AzureWebHost', 'StaticWebConfiguration')) { Import-Module (Join-Path $repository "scripts/$name.psm1") }
 if (-not ('Hexagon.DeliveryTests.DeliveryHttpHandler' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'DeliveryHttpHandler.cs') }
 if (-not ('Hexagon.LifecycleTests.LifecycleHttpHandler' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'LifecycleHttpHandler.cs') }
 $parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
@@ -19,7 +19,7 @@ function Assert-Rejected([scriptblock] $Action, [string] $Code) {
     throw "Expected rejection: $Code"
 }
 function Bytes([string] $Value) { return ,[Text.Encoding]::UTF8.GetBytes($Value) }
-function Copy-Value([object] $Value) { return (ConvertTo-PlatformBootstrapJson $Value) | ConvertFrom-Json -AsHashtable -Depth 60 }
+function Copy-Value([object] $Value) { return (ConvertTo-CanonicalJson $Value) | ConvertFrom-Json -AsHashtable -Depth 60 }
 function Write-Bundle([string] $Path, [hashtable] $Files) {
     $file = [IO.File]::Create($Path); $gzip = [IO.Compression.GZipStream]::new($file, [IO.Compression.CompressionLevel]::Fastest); $tar = [System.Formats.Tar.TarWriter]::new($gzip)
     try {
@@ -29,7 +29,7 @@ function Write-Bundle([string] $Path, [hashtable] $Files) {
         }
     } finally { $tar.Dispose(); $gzip.Dispose(); $file.Dispose() }
 }
-function Set-Arm([string] $Id, [object] $Value, [string] $Version = '2024-03-01', [int] $Status = 200) { $armHandler.Route('GET', "https://management.azure.com${Id}?api-version=$Version", $Status, (ConvertTo-PlatformBootstrapJson $Value)) }
+function Set-Arm([string] $Id, [object] $Value, [string] $Version = '2024-03-01', [int] $Status = 200) { $armHandler.Route('GET', "https://management.azure.com${Id}?api-version=$Version", $Status, (ConvertTo-CanonicalJson $Value)) }
 $webModule = Get-Module StaticWebPublication; $azureModule = Get-Module AzureWebDelivery; $storeModule = Get-Module AzureEnvironmentStore
 try {
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'fixtures/hosting/frontend.json') | ConvertFrom-Json
@@ -38,22 +38,24 @@ try {
     $archive = Join-Path $temporary 'web.tar.gz'
     Write-Bundle $archive @{ 'index.html' = Bytes '<html>production SPA</html>'; 'main-HASH.js' = Bytes 'production-code'; 'assets/fixture.json' = Bytes '{"public":true}' }
     $originalHash = Get-LifecycleFileHash $archive
-    $payload = New-StaticWebPayload $archive $originalHash $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'payload') -Confirm:$false
-    $second = New-StaticWebPayload $archive $originalHash $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'payload-second') -Confirm:$false
+    $payload = New-StaticWebPayload $archive $originalHash $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'payload') -HostFiles (Get-AzureStaticWebHostFiles) -Confirm:$false
+    $second = New-StaticWebPayload $archive $originalHash $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'payload-second') -HostFiles (Get-AzureStaticWebHostFiles) -Confirm:$false
     Assert-True ($payload.deploymentSha256 -ceq $second.deploymentSha256 -and $payload.files.Count -eq 6) 'Payload identity changed on retry or original assets were lost.'
     Assert-True ((Get-LifecycleFileHash $archive) -ceq $originalHash) 'Public configuration changed the original CI archive.'
     $runtime = Get-Content -Raw -LiteralPath (Join-Path $payload.directory 'runtime-config.json')
     Assert-True (-not $runtime.Contains('must-never-be-public') -and ($runtime | ConvertFrom-Json).apiUrl -ceq $outputs.api_url.value) 'An unrelated Terraform output entered public configuration.'
-    Assert-Rejected { New-StaticWebPayload $archive ('0' * 64) $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'wrong-hash') -Confirm:$false } 'bundleChanged'
+    Assert-Rejected { New-StaticWebPayload $archive ('0' * 64) $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'wrong-hash') -HostFiles (Get-AzureStaticWebHostFiles) -Confirm:$false } 'bundleChanged'
     $badArchive = Join-Path $temporary 'reserved.tar.gz'; Write-Bundle $badArchive @{ 'index.html' = Bytes 'index'; 'hexagon-deployment.json' = Bytes '{}' }
-    Assert-Rejected { New-StaticWebPayload $badArchive (Get-LifecycleFileHash $badArchive) $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'reserved') -Confirm:$false } 'reservedOrDuplicateFile'
+    Assert-Rejected { New-StaticWebPayload $badArchive (Get-LifecycleFileHash $badArchive) $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'reserved') -HostFiles (Get-AzureStaticWebHostFiles) -Confirm:$false } 'reservedOrDuplicateFile'
+    Assert-Rejected { New-StaticWebPayload $archive $originalHash $manifest $outputs ('a' * 64) ('b' * 64) (Join-Path $temporary 'foreign-host') -HostFiles @{ 'foreign.json' = @{} } -Confirm:$false } 'hostFileInvalid'
+    Assert-True (-not (Test-StaticWebOrigin 'fixture.azurestaticapps.net.evil.test')) 'A foreign host was accepted.'
     [IO.File]::AppendAllText((Join-Path $second.directory 'main-HASH.js'), 'changed')
     Assert-Rejected { Assert-StaticWebPayload $second } 'payloadChanged'
     $whatIfDirectory = Join-Path $temporary 'what-if'
     New-StaticWebPayload $archive $originalHash $manifest $outputs ('a' * 64) ('b' * 64) $whatIfDirectory -WhatIf | Out-Null
     Assert-True (-not (Test-Path -LiteralPath $whatIfDirectory)) 'SPA WhatIf created files.'
 
-    $http = [Hexagon.DeliveryTests.DeliveryHttpHandler]::new()
+    $http = [Hexagon.DeliveryTests.DeliveryHttpHandler]::new(); $http.RegistrySuffix = '.azurecr.io'
     & $webModule { param($handler) $script:webHttp = $handler; function script:New-PublicWebHttpClient { return [Net.Http.HttpClient]::new($script:webHttp, $false) } } $http
     $origin = 'https://fixture.azurestaticapps.net'
     foreach ($name in $payload.files.Keys) {
@@ -126,7 +128,7 @@ try {
         $inputs.workloads[$id] = $workload; $hosting.state.resources += @{ id = $appId; type = 'azurerm_container_app' }
     }
     $facts = Get-AzureBackendHealth $context $hosting
-    Assert-True ($facts.Count -eq 2 -and $facts[0].readyReplicas -eq 1 -and -not (ConvertTo-PlatformBootstrapJson $facts).Contains('ConnectionStrings')) 'Backend evidence lost a workload or exposed bindings.'
+    Assert-True ($facts.Count -eq 2 -and $facts[0].readyReplicas -eq 1 -and -not (ConvertTo-CanonicalJson $facts).Contains('ConnectionStrings')) 'Backend evidence lost a workload or exposed bindings.'
     $apps['fixture-api'].properties.template.initContainers = $null
     $apps['fixture-api'].properties.template.containers[0].command = $null; $apps['fixture-api'].properties.template.containers[0].args = $null
     Set-Arm $apps['fixture-api'].id $apps['fixture-api']

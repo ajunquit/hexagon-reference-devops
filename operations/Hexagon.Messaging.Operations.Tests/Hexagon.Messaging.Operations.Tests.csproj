@@ -11,14 +11,11 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
-    <PackageReference Include="Testcontainers.ServiceBus" />
-    <PackageReference Include="Testcontainers.Floci" />
     <PackageReference Include="Testcontainers.RabbitMq" />
     <ProjectReference Include="../Hexagon.Messaging.Operations/Hexagon.Messaging.Operations.csproj" />
     <ProjectReference Include="../Hexagon.Database.Bootstrap/Hexagon.Database.Bootstrap.csproj" />
     <PackageReference Include="Testcontainers.PostgreSql" />
   </ItemGroup>
-  <ItemGroup>
-    <None Update="servicebus-config.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
+  <!-- The SDKs of each cloud (docs/separacion-por-nube.md): every template brings only its own file. -->
+  <Import Project="$(MSBuildThisFileDirectory)Cloud.*.props" />
 </Project>

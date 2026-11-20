@@ -1,10 +1,11 @@
 Set-StrictMode -Version Latest
 
-# Broker integration tests per messaging provider.
-$script:ProviderTests = [ordered] @{
-    'azure-service-bus' = 'AzureRuntimeTests'
-    'aws-sns-sqs'       = 'AwsRuntimeTests'
-    'rabbitmq'          = 'RabbitMqRuntimeTests'
+Import-Module (Join-Path $PSScriptRoot 'MessagingOperations.psm1')
+
+# Broker integration tests per messaging provider of this repository (its *OperationsPolicy.psm1 modules).
+$script:ProviderTests = [ordered] @{}
+foreach ($provider in Get-OperationsProviders) {
+    $script:ProviderTests[$provider] = Invoke-OperationsProvider (Get-OperationsProviderModule $provider) Get-OperationsRuntimeTests
 }
 
 # Paths whose changes can alter the broker or PostgreSQL integration results. A change elsewhere
@@ -17,7 +18,7 @@ $script:IntegrationPathPatterns = @(
     '^products/'
     '^tests/fixtures/'
     '^tests/Test-LocalMessagingRuntime\.ps1$'
-    '^scripts/[^/]*(Messaging|ServiceBus|SnsSqs|RabbitMq|CiScope|ApplicationContracts)[^/]*$'
+    '^scripts/[^/]*(Messaging|Policy|Contracts|CiScope|RabbitMq)[^/]*$'
     '^global\.json$'
     '^\.github/workflows/ci\.yml$'
 )

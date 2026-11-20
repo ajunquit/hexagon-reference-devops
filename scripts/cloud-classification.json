@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "description": "Cloud inventory of hexagon-template-devops-az (ADR 0043 of hexagon-template-ng). Ordered rules: the first pattern that matches a tracked file classifies it; '*' also crosses directories.",
+  "destinations": {
+    "common": "hexagon-core-devops",
+    "history": "hexagon-core-devops",
+    "repository": "every repository, rewritten for each one",
+    "aws": "hexagon-template-devops-aws",
+    "azure": "hexagon-template-devops-az",
+    "mixed": "split in phase 2 before moving"
+  },
+  "rules": [
+    {
+      "pattern": "docs/adr/*",
+      "scope": "history"
+    },
+    {
+      "pattern": "CHANGELOG.md",
+      "scope": "history"
+    },
+    {
+      "pattern": ".agents/*",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".claude/*",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".config/hexagon-core-devops-source.json",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".config/product.json",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".editorconfig",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".gitattributes",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".gitignore",
+      "scope": "repository"
+    },
+    {
+      "pattern": ".github/pull_request_template.md",
+      "scope": "repository"
+    },
+    {
+      "pattern": "AGENTS.md",
+      "scope": "repository"
+    },
+    {
+      "pattern": "CLAUDE.md",
+      "scope": "repository"
+    },
+    {
+      "pattern": "README.md",
+      "scope": "repository"
+    },
+    {
+      "pattern": "global.json",
+      "scope": "repository"
+    },
+    {
+      "pattern": "products/README.md",
+      "scope": "repository"
+    },
+    {
+      "pattern": "local/README.md",
+      "scope": "repository"
+    },
+    {
+      "pattern": "scripts/cloud-classification.json",
+      "scope": "repository",
+      "split": "Retired with the template once the split is done."
+    },
+    {
+      "pattern": "scripts/cloud_classification.py",
+      "scope": "repository",
+      "split": "Retired with the template once the split is done."
+    },
+    {
+      "pattern": "tests/python/test_cloud_classification.py",
+      "scope": "repository",
+      "split": "Retired with the template once the split is done."
+    },
+    {
+      "pattern": "docs/separacion-por-nube.md",
+      "scope": "repository",
+      "split": "Retired with the template once the split is done."
+    },
+    {
+      "pattern": "scripts/New-EnvironmentInventory.ps1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/Test-EnvironmentInventory.ps1",
+      "scope": "common"
+    },
+    {
+      "pattern": "contracts/schemas/platform-bootstrap-v1.schema.json",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/modules/hosting/azure/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/modules/messaging/azure-service-bus/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/bootstrap/azure/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/bootstrap/azure-access/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/bootstrap/azure-ephemeral/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/environments/*/azure/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/environments/*/hosting-azure/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "terraform/modules/messaging/rabbitmq/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "terraform/environments/*/rabbitmq/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "terraform/README.md",
+      "scope": "common"
+    },
+    {
+      "pattern": "terraform/bootstrap/README.md",
+      "scope": "common"
+    },
+    {
+      "pattern": "terraform/environments/*/README.md",
+      "scope": "common"
+    },
+    {
+      "pattern": "contracts/schemas/azure-*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "contracts/schemas/*",
+      "scope": "common",
+      "split": "Shared contracts. A contract with cloud slots keeps them neutral; each <cloud>-<contract>.variant.json narrows them (scripts/ContractSchemas.psm1)."
+    },
+    {
+      "pattern": "examples/azure-*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "examples/environment-inventory.json",
+      "scope": "azure"
+    },
+    {
+      "pattern": "examples/ephemeral-environment.json",
+      "scope": "azure"
+    },
+    {
+      "pattern": "examples/platform-bootstrap.yaml",
+      "scope": "azure"
+    },
+    {
+      "pattern": "examples/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/*Azure*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "operations/Directory.Packages.props",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/Hexagon.Database.Bootstrap/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/Hexagon.Messaging.Operations/RabbitMqOperations.cs",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/Hexagon.Messaging.Operations/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/Hexagon.Messaging.Operations.Tests/servicebus-config.json",
+      "scope": "azure"
+    },
+    {
+      "pattern": "operations/Hexagon.Messaging.Operations.Tests/RabbitMqRuntimeTests.cs",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/Hexagon.Messaging.Operations.Tests/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "operations/Hexagon.Platform.Definition/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "acceptance/*",
+      "scope": "common"
+    },
+    {
+      "pattern": ".config/static-web-client.json",
+      "scope": "azure"
+    },
+    {
+      "pattern": ".github/workflows/ci.yml",
+      "scope": "common"
+    },
+    {
+      "pattern": ".github/workflows/platform-diagnostic.yml",
+      "scope": "azure"
+    },
+    {
+      "pattern": ".github/workflows/*",
+      "scope": "common"
+    },
+    {
+      "pattern": ".github/actions/azure-session/*",
+      "scope": "azure"
+    },
+    {
+      "pattern": ".github/actions/cloud-session/*",
+      "scope": "repository"
+    },
+    {
+      "pattern": "scripts/Azure*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "scripts/*-Azure*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "scripts/TerraformAzureLifecycle.psm1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "scripts/StaticWebConfiguration.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/StaticWebPublication.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/Test-StaticBundle.ps1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/LifecycleNative.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/*StaticWeb*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "scripts/*PlatformBootstrap*",
+      "scope": "azure",
+      "split": "Declarative bootstrap implemented for Azure; the AWS template keeps its Terraform bootstrap roots."
+    },
+    {
+      "pattern": "scripts/Test-PlatformFederation.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "scripts/RabbitMq*",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/*-RabbitMq*",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/EnvironmentLifecycle.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/EnvironmentSnapshot.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/KeycloakAuthorization.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/Invoke-KeycloakAuthorization.ps1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/AuthorizationDelivery.psm1",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/workspace*",
+      "scope": "common"
+    },
+    {
+      "pattern": "scripts/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "tests/Test-Azure*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-StaticWeb*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-PlatformBootstrap*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-PlatformFederation.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-KeycloakDelivery.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-RabbitMq*",
+      "scope": "common"
+    },
+    {
+      "pattern": "tests/Test-EnvironmentLifecycle.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-EnvironmentWorkflow.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-ApplicationDelivery.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/Test-Acceptance.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/LifecycleHttpHandler.cs",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/fixtures/operations/azure-*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/fixtures/local-messaging/azure-*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/fixtures/hosting/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "tests/Invoke-FlociRootsAzure.ps1",
+      "scope": "azure"
+    },
+    {
+      "pattern": "tests/*",
+      "scope": "common"
+    },
+    {
+      "pattern": "docs/*azure*",
+      "scope": "azure"
+    },
+    {
+      "pattern": "docs/publicacion-spa-y-salud.md",
+      "scope": "azure"
+    },
+    {
+      "pattern": "docs/recursos-locales.md",
+      "scope": "common"
+    },
+    {
+      "pattern": "docs/auth-y-base-compartida.md",
+      "scope": "azure"
+    },
+    {
+      "pattern": "docs/bootstrap-plataformas.md",
+      "scope": "azure"
+    },
+    {
+      "pattern": "docs/fase-9-entrega-producto.md",
+      "scope": "history"
+    },
+    {
+      "pattern": "docs/ruta-plataforma.md",
+      "scope": "history"
+    },
+    {
+      "pattern": "docs/*",
+      "scope": "common"
+    }
+  ]
+}

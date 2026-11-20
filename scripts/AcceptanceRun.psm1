@@ -1,15 +1,15 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('AzureAcceptance', 'AcceptanceCleanup', 'AzureEnvironmentStore', 'EnvironmentSnapshot')) { Import-Module (Join-Path $PSScriptRoot "$name.psm1") }
+# The run of the authenticated acceptance is common: each cloud passes its browser, its cleanup of the
+# consented resources and its evidence store.
 
 function Invoke-AcceptanceRun {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([hashtable] $Context, [hashtable] $Journal, [hashtable] $Consent, [string] $ConsentSha256,
         [hashtable] $Configuration, [string] $Workspace, [Parameter(Mandatory)][scriptblock] $Seed,
         [Parameter(Mandatory)][scriptblock] $PersistJournal,
-        [scriptblock] $Browser = { param($context, $configuration) Invoke-AzureBrowserAcceptance $context $configuration -Confirm:$false },
-        [scriptblock] $Cleanup = { param($context, $consent, $workspace) Invoke-AcceptanceCleanup $context $consent $workspace -Confirm:$false },
-        [scriptblock] $PersistEvidence = { param($context, $evidence) Save-AcceptanceEvidence $context $evidence -Confirm:$false })
+        [Parameter(Mandatory)][scriptblock] $Browser, [Parameter(Mandatory)][scriptblock] $Cleanup,
+        [Parameter(Mandatory)][scriptblock] $PersistEvidence)
     if (-not $PSCmdlet.ShouldProcess($Context.prefix, 'Run acceptance and retire the consented ephemeral instance')) { return }
     if ($Journal.ContainsKey('acceptance')) { throw 'lifecycle.acceptance.alreadyStarted' }
     $Journal.acceptance = @{ consentSha256 = $ConsentSha256; status = 'Testing'; journeySucceeded = $false; cleanupStatus = 'Pending'; evidenceSha256 = $null }

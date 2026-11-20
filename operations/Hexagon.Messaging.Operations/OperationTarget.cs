@@ -50,40 +50,10 @@ internal sealed record OperationTarget
             throw new InvalidOperationException("Invalid operation target constraints.");
         }
 
-        switch (Provider)
-        {
-            case "azure-service-bus":
-                if (Namespace is null || !Regex.IsMatch(Namespace, "^[a-zA-Z0-9-]+[.]servicebus[.]windows[.]net$") ||
-                    !EntityName(Topic) || !EntityName(Subscription) || !HasDeadLetter)
-                {
-                    throw new InvalidOperationException("Invalid Azure target.");
-                }
-                break;
-            case "aws-sns-sqs":
-                if (Region is null || !Regex.IsMatch(Region, "^[a-z]{2}(-[a-z]+)+-[0-9]$") ||
-                    !QueueUrl(SourceQueue) || (HasDeadLetter && !QueueUrl(DeadLetterQueue)) ||
-                    (HasDeadLetter && (SourceQueue == DeadLetterQueue ||
-                        new Uri(SourceQueue!).Segments[1] != new Uri(DeadLetterQueue!).Segments[1])))
-                {
-                    throw new InvalidOperationException("Invalid AWS target.");
-                }
-                break;
-            case "rabbitmq":
-                if (!EntityName(SourceQueue) || !EntityName(VirtualHost) || !EntityName(Exchange) ||
-                    (HasDeadLetter && (!EntityName(DeadLetterQueue) || SourceQueue == DeadLetterQueue)))
-                {
-                    throw new InvalidOperationException("Invalid RabbitMQ target.");
-                }
-                break;
-            default:
-                throw new InvalidOperationException("Unsupported provider.");
-        }
+        MessagingProviders.Get(Provider).Validate(this);
     }
 
-    private static bool EntityName(string? value) => value is not null &&
+    internal static bool EntityName(string? value) => value is not null &&
         Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$");
 
-    private bool QueueUrl(string? value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-        uri.Scheme == "https" && uri.IsDefaultPort && string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.Fragment) &&
-        uri.Host == $"sqs.{Region}.amazonaws.com" && Regex.IsMatch(uri.AbsolutePath, "^/[0-9]{12}/[A-Za-z0-9_-]+$");
 }

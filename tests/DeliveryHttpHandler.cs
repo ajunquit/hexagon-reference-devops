@@ -15,6 +15,8 @@ public sealed class DeliveryHttpHandler : HttpMessageHandler
     public Dictionary<string, Dictionary<string, string>> ResponseHeaders { get; } = new();
     public List<string> Requests { get; } = new();
     public List<Dictionary<string, string>> Headers { get; } = new();
+    /// <summary>Host suffix of the registry that this double serves with the OCI protocol; none by default.</summary>
+    public string? RegistrySuffix { get; set; }
     public Dictionary<string, byte[]> RegistryBlobs { get; } = new();
     public Dictionary<string, byte[]> RegistryManifests { get; } = new();
     public List<byte[]> UploadedBodies { get; } = new();
@@ -50,7 +52,7 @@ public sealed class DeliveryHttpHandler : HttpMessageHandler
                 }
             return reply;
         }
-        if (!uri.Host.EndsWith(".azurecr.io", StringComparison.Ordinal)) return Reply(404, Array.Empty<byte>());
+        if (RegistrySuffix is null || !uri.Host.EndsWith(RegistrySuffix, StringComparison.Ordinal)) return Reply(404, Array.Empty<byte>());
         var path = uri.AbsolutePath;
         if (path == "/oauth2/token") return Reply(200, Encoding.UTF8.GetBytes("{\"access_token\":\"fixture-access\"}"));
         if (request.Method == HttpMethod.Head)

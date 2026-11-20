@@ -8,6 +8,10 @@ param([switch] $VerifySources, [string] $WorkspaceRoot)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# The guardrails of each cloud (docs/separacion-por-nube.md): <Cloud>Repository.psd1 lists its required
+# paths, tests and Terraform roots. The core checks below run in every repository.
+$cloudChecks = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*Repository.psd1' -File | Sort-Object Name |
+    ForEach-Object { Import-PowerShellDataFile -LiteralPath $_.FullName })
 
 $resourceHelper = Join-Path $PSScriptRoot 'workspace_resources.py'
 $resourceCommand = Get-Command python -ErrorAction SilentlyContinue
@@ -37,48 +41,16 @@ if ($LASTEXITCODE -ne 0) { throw 'Local resource guardrail tests failed.' }
 
 
 $requiredPaths = @(
-    'contracts/schemas/platform-bootstrap-v1.schema.json',
     'contracts/schemas/environment-inventory-v1.schema.json',
     'scripts/EnvironmentLifecycle.psm1',
     'scripts/New-EnvironmentInventory.ps1',
     'scripts/Test-EnvironmentInventory.ps1',
-    'tests/Test-EnvironmentLifecycle.ps1',
-    'tests/Test-EnvironmentLifecycleAws.ps1',
-    'tests/Test-EphemeralEnvironmentAws.ps1',
-    'tests/Test-AwsEnvironmentStore.ps1',
-    'tests/Test-AwsLifecycleResources.ps1',
-    'tests/Test-AwsLifecycleAdapter.ps1',
-    'tests/Test-AwsLifecycleStages.ps1',
-    'tests/Test-AwsApplicationDelivery.ps1',
-    'tests/Test-AwsWebDelivery.ps1',
-    'scripts/AwsApplicationDelivery.psm1',
-    'scripts/AwsWebDelivery.psm1',
-    'scripts/AwsAcceptance.psm1',
-    'scripts/AwsOciDelivery.psm1',
-    'scripts/AwsMaintenanceDelivery.psm1',
-    'scripts/Invoke-AwsEnvironment.ps1',
-    'scripts/AwsLifecycleInputs.psm1',
-    'contracts/schemas/aws-environment-result-v1.schema.json',
-    'tests/Invoke-FlociRoots.ps1',
     'docs/pruebas-locales-floci.md',
+    'tests/FlociSupport.ps1',
     'docs/adr/0026-floci-como-plataforma-local.md',
-    'scripts/TerraformAwsLifecycle.psm1',
-    'scripts/AwsLifecycleResources.psm1',
-    'scripts/AwsEnvironmentStore.psm1',
-    'scripts/AwsEphemeralEnvironment.psm1',
-    'examples/ephemeral-environment-aws.json',
-    'examples/environment-inventory-aws.json',
     'docs/motor-ciclo-ambiente.md',
-    'scripts/Invoke-AzureEnvironment.ps1',
-    'scripts/AzureEnvironmentStore.psm1',
-    'scripts/TerraformAzureLifecycle.psm1',
     'scripts/EnvironmentSnapshot.psm1',
     'contracts/schemas/environment-snapshot-v1.schema.json',
-    'contracts/schemas/azure-environment-result-v1.schema.json',
-    'tests/Test-AzureEnvironmentAdapter.ps1',
-    'tests/LifecycleHttpHandler.cs',
-    'docs/adaptador-ciclo-azure.md',
-    'docs/ciclo-efimero-azure.md',
     'contracts/schemas/ephemeral-environment-v1.schema.json',
     'contracts/schemas/ephemeral-bootstrap-result-v1.schema.json',
     'contracts/schemas/environment-workflow-result-v1.schema.json',
@@ -86,22 +58,10 @@ $requiredPaths = @(
     'scripts/EnvironmentWorkflow.psm1',
     'scripts/Invoke-ApplicationDelivery.ps1',
     'scripts/ApplicationArtifacts.psm1',
-    'scripts/AzureOciDelivery.psm1',
-    'scripts/AzureMaintenanceDelivery.psm1',
-    'scripts/AzureApplicationDelivery.psm1',
-    'scripts/AzureWebDelivery.psm1',
     'scripts/StaticWebPublication.psm1',
-    'scripts/StaticWebClient.psm1',
-    'scripts/Install-StaticWebClient.ps1',
-    '.config/static-web-client.json',
-    'tests/Test-StaticWebPublication.ps1',
-    'tests/Test-StaticWebClient.ps1',
-    'scripts/AzureLifecycleInputs.psm1',
     'contracts/schemas/application-delivery-v1.schema.json',
     'contracts/schemas/application-delivery-journal-v1.schema.json',
     'contracts/schemas/application-delivery-result-v1.schema.json',
-    'tests/Test-ApplicationDelivery.ps1',
-    'tests/Test-KeycloakDelivery.ps1',
     'tests/Test-KeycloakAuthorization.ps1',
     'tests/Invoke-KeycloakAuthorizationAcceptance.ps1',
     'tests/Invoke-AuthLocalIntegration.ps1',
@@ -110,28 +70,21 @@ $requiredPaths = @(
     'scripts/AuthorizationDelivery.psm1',
     'scripts/Invoke-KeycloakAuthorization.ps1',
     'contracts/schemas/keycloak-authorization-v1.schema.json',
-    'scripts/AzureKeycloakDelivery.psm1',
     '.github/workflows/delivery.yml',
-    'docs/entrega-aplicaciones-azure.md',
     'scripts/Invoke-EphemeralBootstrap.ps1',
     'scripts/Invoke-EnvironmentWorkflow.ps1',
     'scripts/Test-EphemeralFederation.ps1',
-    'tests/Test-EnvironmentWorkflow.ps1',
+    'tests/Test-CloudAdapters.ps1',
+    'scripts/CloudAdapters.psm1',
     '.github/workflows/genesis.yml',
     '.github/workflows/apocalypse.yml',
-    'terraform/bootstrap/azure-ephemeral/main.tf',
+    '.github/actions/cloud-session/action.yml',
     'contracts/schemas/platform-bootstrap-result-v1.schema.json',
-    'scripts/Invoke-PlatformBootstrap.ps1',
-    'scripts/PlatformBootstrap.psm1',
-    'scripts/PlatformBootstrap.Execution.psm1',
-    'scripts/Invoke-PlatformBootstrapStage.ps1',
-    'scripts/Test-PlatformFederation.ps1',
-    '.github/workflows/platform-diagnostic.yml',
+    'scripts/CanonicalJson.psm1',
+    'scripts/ContractSchemas.psm1',
+    'scripts/Update-CoreDevops.ps1',
     'contracts/schemas/platform-bootstrap-review-v1.schema.json',
     'contracts/schemas/platform-bootstrap-execution-v1.schema.json',
-    'tests/Test-PlatformBootstrapExecution.ps1',
-    'tests/Test-PlatformBootstrap.ps1',
-    'docs/bootstrap-plataformas.md',
     'AGENTS.md',
     '.github/workflows/ci.yml',
     '.config/product.json',
@@ -139,25 +92,8 @@ $requiredPaths = @(
     'scripts/Test-ComponentBuild.ps1',
     'tests/Test-ComponentBuild.ps1',
     'contracts/schemas/application-release-v1.schema.json',
-    'contracts/schemas/azure-hosting-policy-v1.schema.json',
-    'contracts/schemas/aws-hosting-policy-v1.schema.json',
-    'examples/aws-hosting-policy.json',
-    'scripts/Export-AwsHostingInputs.ps1',
-    'docs/hosting-azure.md',
-    'docs/adr/0010-primera-referencia-de-hosting-en-azure.md',
-    'terraform/modules/hosting/azure/README.md',
-    'docs/hosting-aws.md',
-    'docs/adr/0023-referencia-de-hosting-en-aws.md',
-    'docs/adr/0024-credenciales-de-base-de-datos-en-aws.md',
-    'docs/adr/0025-ciclo-de-ambiente-en-aws.md',
-    'docs/ciclo-efimero-aws.md',
-    'terraform/bootstrap/aws-access/README.md',
-    'terraform/bootstrap/aws-ephemeral/README.md',
-    'terraform/modules/hosting/aws/README.md',
     'CHANGELOG.md',
     'contracts/schemas/product-environment-v1.schema.json',
-    'contracts/schemas/azure-service-bus-policy-v1.schema.json',
-    'contracts/schemas/aws-sns-sqs-policy-v1.schema.json',
     'contracts/schemas/rabbitmq-policy-v1.schema.json',
     'contracts/schemas/local-messaging-bindings-v1.schema.json',
     'contracts/schemas/messaging-operations-policy-v1.schema.json',
@@ -175,17 +111,11 @@ $requiredPaths = @(
     'docs/adr/0006-topologia-de-aws-sns-sqs-con-redrive-por-cola.md',
     'docs/adr/0007-topologia-de-rabbitmq-con-dlx-por-cola.md',
     'docs/adr/0008-topologia-local-fuera-del-apphost.md',
-    'docs/politica-azure-service-bus.md',
-    'docs/politica-aws-sns-sqs.md',
     'docs/politica-rabbitmq.md',
     'terraform/bootstrap/README.md',
-    'terraform/bootstrap/azure/versions.tf',
-    'terraform/bootstrap/aws/versions.tf',
     'terraform/environments/dev/README.md',
     'terraform/environments/staging/README.md',
     'terraform/environments/prod/README.md',
-    'terraform/modules/messaging/azure-service-bus/README.md',
-    'terraform/modules/messaging/aws-sns-sqs/README.md',
     'terraform/modules/messaging/rabbitmq/README.md',
     'scripts/New-LocalMessaging.ps1',
     'scripts/Start-LocalMessaging.ps1',
@@ -194,14 +124,29 @@ $requiredPaths = @(
     'scripts/Get-CiScope.ps1',
     'scripts/CiScope.psm1',
     'tests/Test-CiScope.ps1',
-    'tests/Test-AzureServiceBusContracts.ps1',
-    'tests/Test-AwsSnsSqsContracts.ps1',
     'tests/Test-RabbitMqContracts.ps1',
     'tests/Test-LocalMessaging.ps1',
     'tests/Test-LocalMessagingRuntime.ps1',
     'tests/fixtures/backend/.hexagon/messaging-requirements.json',
-    'tests/fixtures/backend/.hexagon/schemas/messaging-requirements-v1.schema.json'
-)
+    'tests/fixtures/backend/.hexagon/schemas/messaging-requirements-v1.schema.json',
+    'scripts/LocalMessagingSupport.psm1',
+    'scripts/RabbitMqOperationsPolicy.psm1',
+    'scripts/RabbitMqLocalMessaging.psm1'
+) + @($cloudChecks | ForEach-Object { $_.RequiredPaths })
+
+# A cloud template carries a pinned copy of the base: no copied file may change in place
+# (scripts/Update-CoreDevops.ps1 is the only way to update it).
+$coreSource = Join-Path $repositoryRoot '.config/hexagon-core-devops-source.json'
+if (Test-Path -LiteralPath $coreSource) {
+    $copy = Get-Content -Raw -LiteralPath $coreSource | ConvertFrom-Json -AsHashtable
+    if ($copy.apiVersion -cne 'hexagon.ec/core-devops-source/v1' -or $copy.commit -cnotmatch '^[0-9a-f]{40}$' -or $copy.files.Count -eq 0) { throw 'Invalid copy of the base.' }
+    foreach ($entry in $copy.files.GetEnumerator()) {
+        $copied = Join-Path $repositoryRoot $entry.Key
+        if (-not (Test-Path -LiteralPath $copied -PathType Leaf) -or (Get-FileHash -LiteralPath $copied -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entry.Value) {
+            throw "The copy of the base changed in place: $($entry.Key). Change it in hexagon-core-devops and run scripts/Update-CoreDevops.ps1."
+        }
+    }
+}
 
 foreach ($path in $requiredPaths) {
     if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $path))) {
@@ -211,30 +156,21 @@ foreach ($path in $requiredPaths) {
 
 $schemaPath = Join-Path $repositoryRoot 'contracts/schemas/product-environment-v1.schema.json'
 Get-Content -Raw -LiteralPath $schemaPath | ConvertFrom-Json | Out-Null
-$serviceBusSchemaPath = Join-Path $repositoryRoot 'contracts/schemas/azure-service-bus-policy-v1.schema.json'
-Get-Content -Raw -LiteralPath $serviceBusSchemaPath | ConvertFrom-Json | Out-Null
-$awsSchemaPath = Join-Path $repositoryRoot 'contracts/schemas/aws-sns-sqs-policy-v1.schema.json'
-Get-Content -Raw -LiteralPath $awsSchemaPath | ConvertFrom-Json | Out-Null
-$rabbitMqSchemaPath = Join-Path $repositoryRoot 'contracts/schemas/rabbitmq-policy-v1.schema.json'
-Get-Content -Raw -LiteralPath $rabbitMqSchemaPath | ConvertFrom-Json | Out-Null
-$localBindingsSchemaPath = Join-Path $repositoryRoot 'contracts/schemas/local-messaging-bindings-v1.schema.json'
-Get-Content -Raw -LiteralPath $localBindingsSchemaPath | ConvertFrom-Json | Out-Null
-
 $examplePath = Join-Path $repositoryRoot 'examples/product-environment.json'
 & (Join-Path $PSScriptRoot 'Test-ProductEnvironmentDescriptor.ps1') `
     -Descriptor $examplePath
-$serviceBusExamplePath = Join-Path $repositoryRoot 'examples/azure-service-bus-policy.json'
-& (Join-Path $PSScriptRoot 'Test-AzureServiceBusPolicy.ps1') `
-    -Policy $serviceBusExamplePath
-$awsExamplePath = Join-Path $repositoryRoot 'examples/aws-sns-sqs-policy.json'
-& (Join-Path $PSScriptRoot 'Test-AwsSnsSqsPolicy.ps1') `
-    -Policy $awsExamplePath
-$rabbitMqExamplePath = Join-Path $repositoryRoot 'examples/rabbitmq-policy.json'
-& (Join-Path $PSScriptRoot 'Test-RabbitMqPolicy.ps1') `
-    -Policy $rabbitMqExamplePath
+# Every messaging provider of the repository validates its example topology and the operations example
+# validates against the RabbitMQ topology of the core.
+Import-Module (Join-Path $PSScriptRoot 'MessagingOperations.psm1') -Force
+$messagingProviders = @(Get-OperationsProviders)
+foreach ($provider in $messagingProviders) {
+    $contracts = Invoke-OperationsProvider (Get-OperationsProviderModule $provider) Get-OperationsContracts
+    Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "contracts/schemas/$provider-policy-v1.schema.json") | ConvertFrom-Json | Out-Null
+    & (Join-Path $PSScriptRoot "Test-$($contracts)Policy.ps1") -Policy (Join-Path $repositoryRoot "examples/$provider-policy.json")
+}
 & (Join-Path $PSScriptRoot 'Test-MessagingOperationsPolicy.ps1') `
     -Policy (Join-Path $repositoryRoot 'examples/messaging-operations-policy.json') `
-    -TopologyPolicy $awsExamplePath
+    -TopologyPolicy (Join-Path $repositoryRoot 'examples/rabbitmq-policy.json')
 
 $productsPath = Join-Path $repositoryRoot 'products'
 $descriptors = @(
@@ -246,31 +182,13 @@ foreach ($descriptor in $descriptors) {
         -Descriptor $descriptor.FullName -VerifySources:$VerifySources
 }
 
-$serviceBusPolicies = @(
-    Get-ChildItem -LiteralPath $productsPath -Recurse -File -Filter 'azure-service-bus-policy.json' |
-        Where-Object FullName -NotLike '*\.git\*'
-)
-foreach ($policy in $serviceBusPolicies) {
-    & (Join-Path $PSScriptRoot 'Test-AzureServiceBusPolicy.ps1') `
-        -Policy $policy.FullName
-}
-
-$awsPolicies = @(
-    Get-ChildItem -LiteralPath $productsPath -Recurse -File -Filter 'aws-sns-sqs-policy.json' |
-        Where-Object FullName -NotLike '*\.git\*'
-)
-foreach ($policy in $awsPolicies) {
-    & (Join-Path $PSScriptRoot 'Test-AwsSnsSqsPolicy.ps1') `
-        -Policy $policy.FullName
-}
-
-$rabbitMqPolicies = @(
-    Get-ChildItem -LiteralPath $productsPath -Recurse -File -Filter 'rabbitmq-policy.json' |
-        Where-Object FullName -NotLike '*\.git\*'
-)
-foreach ($policy in $rabbitMqPolicies) {
-    & (Join-Path $PSScriptRoot 'Test-RabbitMqPolicy.ps1') `
-        -Policy $policy.FullName
+$messagingPolicies = 0
+foreach ($provider in $messagingProviders) {
+    $contracts = Invoke-OperationsProvider (Get-OperationsProviderModule $provider) Get-OperationsContracts
+    foreach ($policy in @(Get-ChildItem -LiteralPath $productsPath -Recurse -File -Filter "$provider-policy.json" | Where-Object FullName -NotLike '*\.git\*')) {
+        & (Join-Path $PSScriptRoot "Test-$($contracts)Policy.ps1") -Policy $policy.FullName
+        $messagingPolicies++
+    }
 }
 
 $operationsPolicies = @(Get-ChildItem -LiteralPath $productsPath -Recurse -File -Filter 'messaging-operations-policy.json')
@@ -283,6 +201,18 @@ foreach ($policy in $operationsPolicies) {
 # CI is authorized in 9B. Deployment identities and Terraform apply remain in the later delivery phases.
 $workflow = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot '.github/workflows/ci.yml')
 if ($workflow -match 'pull_request_target|id-token:\s*write|\bterraform\b[^\r\n]*\bapply\b' -or $workflow -match '(?m)^\s*-?\s*uses:\s*[^\s]+@(?![0-9a-f]{40}\b)') { throw 'CI must use pinned actions without privileged deployment operations.' }
+
+# The environment workflows open the cloud session through the action of the template (docs/separacion-por-nube.md):
+# they never authenticate or branch by cloud themselves, and every external action is pinned by commit.
+foreach ($name in @('genesis', 'apocalypse', 'delivery')) {
+    $environmentWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot ".github/workflows/$name.yml")
+    if ($environmentWorkflow -notmatch '(?m)^\s*uses:\s*[.]/[.]github/actions/cloud-session\s*$' -or $environmentWorkflow -match 'outputs[.]provider|configure-[a-z]+-credentials|/login@|role-to-assume|client-id:') {
+        throw "Workflow $name must open the cloud session only through .github/actions/cloud-session."
+    }
+}
+foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot '.github') -Recurse -File -Include '*.yml', '*.yaml')) {
+    if ((Get-Content -Raw -LiteralPath $file.FullName) -match '(?m)^\s*-?\s*uses:\s*(?![.]/)[^\s]+@(?![0-9a-f]{40}\b)') { throw "$($file.Name) must pin every external action by commit." }
+}
 
 $versionedCandidates = & git -C $repositoryRoot ls-files --cached --others --exclude-standard
 if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate repository files.' }
@@ -325,42 +255,24 @@ if ($parserErrors.Count -gt 0) {
 
 & (Join-Path $repositoryRoot 'tests/Test-Contracts.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-CiScope.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AzureServiceBusContracts.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AwsSnsSqsContracts.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-RabbitMqContracts.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-LocalMessaging.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-MessagingOperations.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-MessagingOperationsExport.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-HostingContracts.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-KeycloakAuthorization.ps1')
 & (Join-Path $repositoryRoot 'tests/Test-ComponentBuild.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-PlatformBootstrap.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-PlatformBootstrapExecution.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-PlatformFederation.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-EnvironmentLifecycle.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-EnvironmentLifecycleAws.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AzureEnvironmentAdapter.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-EnvironmentWorkflow.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-EphemeralEnvironmentAws.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AwsEnvironmentStore.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AwsLifecycleResources.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AwsLifecycleAdapter.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AwsLifecycleStages.ps1')
-& (Join-Path $repositoryRoot 'tests/Test-AwsApplicationDelivery.ps1')
-& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-AwsWebDelivery.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'AWS web delivery tests failed.' }
-# Delivery HTTP fixtures must not reuse the lifecycle suites' cached module mocks.
-& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-ApplicationDelivery.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'Application delivery tests failed.' }
-& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-KeycloakDelivery.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'Integrated identity delivery tests failed.' }
-& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-Acceptance.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'Acceptance consent and cleanup protocol tests failed.' }
-& node --test (Join-Path $repositoryRoot 'acceptance/browser.test.mjs') (Join-Path $repositoryRoot 'acceptance/cloudfront-function.test.mjs')
-if ($LASTEXITCODE -ne 0) { throw 'Browser or CloudFront Function tests failed. Install acceptance dependencies and Chromium first.' }
-# Isolate HTTP fixtures from modules cached by the lifecycle suites in this process.
-& pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot 'tests/Test-StaticWebPublication.ps1')
-if ($LASTEXITCODE -ne 0) { throw 'Static web publication and backend health tests failed.' }
+& (Join-Path $repositoryRoot 'tests/Test-CloudAdapters.ps1')
+foreach ($checks in $cloudChecks) {
+    foreach ($test in $checks.Tests) { & (Join-Path $repositoryRoot $test) }
+    # HTTP fixtures run in their own process, away from the modules cached by the lifecycle suites.
+    foreach ($test in $checks.IsolatedTests) {
+        & pwsh -NoLogo -NoProfile -File (Join-Path $repositoryRoot $test)
+        if ($LASTEXITCODE -ne 0) { throw "$test failed." }
+    }
+}
+$nodeTests = @('acceptance/browser.test.mjs') + @($cloudChecks | ForEach-Object { $_.NodeTests })
+& node --test @($nodeTests | ForEach-Object { Join-Path $repositoryRoot $_ })
+if ($LASTEXITCODE -ne 0) { throw 'Browser acceptance tests failed. Install acceptance dependencies and Chromium first.' }
 & dotnet format whitespace (Join-Path $repositoryRoot 'operations/Hexagon.Platform.Definition/Hexagon.Platform.Definition.csproj') --verify-no-changes --no-restore --verbosity quiet
 if ($LASTEXITCODE -ne 0) { throw 'Platform definition reader whitespace validation failed.' }
 
@@ -392,33 +304,11 @@ try {
     & $resourcePython $resourceHelper check --workspace-root $WorkspaceRoot
     if ($LASTEXITCODE -ne 0) { throw 'Resource budget exceeded after tests. Stop before initializing providers.' }
     $terraformRoots = @(
-        'terraform/bootstrap/azure',
-        'terraform/bootstrap/azure-access',
-        'terraform/bootstrap/azure-ephemeral',
-        'terraform/bootstrap/aws',
-        'terraform/bootstrap/aws-access',
-        'terraform/bootstrap/aws-ephemeral',
-        'terraform/modules/messaging/azure-service-bus',
-        'terraform/modules/messaging/aws-sns-sqs',
         'terraform/modules/messaging/rabbitmq',
-        'terraform/modules/hosting/azure',
-        'terraform/modules/hosting/aws',
-        'terraform/environments/dev/hosting-azure',
-        'terraform/environments/staging/hosting-azure',
-        'terraform/environments/prod/hosting-azure',
-        'terraform/environments/dev/hosting-aws',
-        'terraform/environments/staging/hosting-aws',
-        'terraform/environments/prod/hosting-aws',
-        'terraform/environments/dev/azure',
-        'terraform/environments/dev/aws',
         'terraform/environments/dev/rabbitmq',
-        'terraform/environments/staging/azure',
-        'terraform/environments/staging/aws',
         'terraform/environments/staging/rabbitmq',
-        'terraform/environments/prod/azure',
-        'terraform/environments/prod/aws',
         'terraform/environments/prod/rabbitmq'
-    )
+    ) + @($cloudChecks | ForEach-Object { $_.TerraformRoots })
     foreach ($terraformRoot in $terraformRoots) {
         & $resourcePython $resourceHelper init --workspace-root $WorkspaceRoot `
             --root (Join-Path $repositoryRoot $terraformRoot) --cache-only -- `
@@ -433,19 +323,8 @@ try {
     }
 
     $terraformTestRoots = @(
-        'terraform/bootstrap/azure',
-        'terraform/bootstrap/azure-access',
-        'terraform/bootstrap/azure-ephemeral',
-        'terraform/bootstrap/aws',
-        'terraform/bootstrap/aws-access',
-        'terraform/bootstrap/aws-ephemeral',
-        'terraform/modules/messaging/azure-service-bus',
-        'terraform/modules/messaging/aws-sns-sqs',
-        'terraform/modules/messaging/rabbitmq',
-        'terraform/modules/hosting/azure',
-        'terraform/modules/hosting/aws',
-        'terraform/environments/dev/hosting-aws'
-    )
+        'terraform/modules/messaging/rabbitmq'
+    ) + @($cloudChecks | ForEach-Object { $_.TerraformTestRoots })
     foreach ($terraformTestRoot in $terraformTestRoots) {
         & terraform "-chdir=$terraformTestRoot" test -no-color
         if ($LASTEXITCODE -ne 0) {
@@ -468,4 +347,4 @@ finally {
     Pop-Location
 }
 
-Write-Host "Repository checks passed. Validated $($descriptors.Count) product descriptors, $($serviceBusPolicies.Count) Azure Service Bus policies, $($awsPolicies.Count) AWS SNS/SQS policies, and $($rabbitMqPolicies.Count) RabbitMQ policies."
+Write-Host "Repository checks passed. Validated $($descriptors.Count) product descriptors and $messagingPolicies messaging topology policies for $($messagingProviders -join ', ')."

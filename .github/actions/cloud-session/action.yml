@@ -1,0 +1,27 @@
+name: Cloud session
+description: >-
+  Opens the session of the cloud of this template (Azure): checks the bindings of the GitHub
+  environment and authenticates through OIDC. The environment workflows of the base call this action.
+inputs:
+  target:
+    description: Public target details returned by the validation of the instance, as JSON
+    required: true
+  bindings:
+    description: Variables of the GitHub environment, as JSON
+    required: true
+  stage:
+    description: Stage of the run, for the tools that only some stages need
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Reject a target of another cloud
+      if: fromJSON(inputs.target).provider != 'azure'
+      shell: pwsh
+      run: throw 'Unsupported cloud target.'
+    - uses: ./.github/actions/azure-session
+      with:
+        target: ${{ inputs.target }}
+        bindings: ${{ inputs.bindings }}
+        stage: ${{ inputs.stage }}

@@ -1,9 +1,11 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
-$script:lifecycleSchema = Join-Path (Split-Path -Parent $PSScriptRoot) 'contracts/schemas/environment-inventory-v1.schema.json'
-# Never managed by an environment: federation, static credentials and the bootstrap boundaries (ADR 0012, ADR 0025).
-$script:awsForbiddenTypes = @('aws_iam_openid_connect_provider', 'aws_iam_user', 'aws_iam_access_key', 'aws_iam_user_policy', 'aws_iam_user_policy_attachment')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
+Import-Module (Join-Path $PSScriptRoot 'ContractSchemas.psm1')
+# The rules of each cloud (docs/separacion-por-nube.md): a module named *EnvironmentRules.psm1 next to
+# this one recognizes its target and owns its roots, resource scope and plan scope. The modules export
+# nothing; the engine calls their functions inside them.
+$script:rules = $null
 
 function Resolve-LifecycleFilePath([string] $Path) {
     return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
@@ -14,25 +16,40 @@ function Get-LifecycleFileHash([string] $Path) {
 }
 
 function Get-LifecycleValueHash([object] $Value) {
-    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $Value))
+    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $Value))
     return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
 }
 
-function Get-LifecycleProvider([hashtable] $Inventory) {
-    return $(if ($Inventory.target.ContainsKey('accountId')) { 'aws' } else { 'azure' })
+function Get-EnvironmentRuleModules {
+    if ($null -eq $script:rules) {
+        $script:rules = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*EnvironmentRules.psm1' -File | Sort-Object Name |
+            ForEach-Object { Import-Module $_.FullName -PassThru -DisableNameChecking })
+    }
+    return $script:rules
 }
 
-# The short AWS prefix of an instance (ADR 0025): the base alone when persistent, plus six hex characters
-# of SHA-256(product/environment/instance) when ephemeral, so that it fits the 19 characters of name_prefix.
-function Get-LifecycleAwsPrefixSuffix([hashtable] $Inventory) {
-    $bytes = [Text.Encoding]::UTF8.GetBytes("$($Inventory.product)/$($Inventory.environment)/$($Inventory.instance.id)")
-    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant().Substring(0, 6)
+function Invoke-EnvironmentRules([Management.Automation.PSModuleInfo] $Rules, [string] $Name, [object[]] $Arguments = @()) {
+    return & $Rules { param($command, $values) & $command @values } $Name $Arguments
 }
 
-# Terraform IDs of AWS resources are not scoped (vpc-..., names, URLs): the inventory qualifies them.
+# The rules that recognize the target of the inventory; none, or more than one, is an unsupported target.
+function Get-EnvironmentRules([hashtable] $Inventory) {
+    if ($Inventory.target -isnot [Collections.IDictionary]) { throw 'lifecycle.cloud.targetUnsupported' }
+    $matching = @(Get-EnvironmentRuleModules | Where-Object { Invoke-EnvironmentRules $_ Test-EnvironmentRulesTarget @(, $Inventory.target) })
+    if ($matching.Count -ne 1) { throw 'lifecycle.cloud.targetUnsupported' }
+    return $matching[0]
+}
+
+# The rules that own the adapter of a root: the snapshot packages its directories.
+function Get-EnvironmentAdapterRules([string] $Adapter) {
+    $matching = @(Get-EnvironmentRuleModules | Where-Object { Invoke-EnvironmentRules $_ Test-EnvironmentRulesAdapter @($Adapter) })
+    if ($matching.Count -ne 1) { throw 'lifecycle.snapshotRootUnknown' }
+    return $matching[0]
+}
+
+# Terraform IDs are not always scoped by the cloud: its rules qualify them with the inventory.
 function ConvertTo-LifecycleResourceId([hashtable] $Inventory, [string] $Type, [string] $Id) {
-    if ((Get-LifecycleProvider $Inventory) -ceq 'aws') { return "aws:$($Inventory.target.accountId):$($Inventory.target.region):$($Type):$Id" }
-    return $Id
+    return Invoke-EnvironmentRules (Get-EnvironmentRules $Inventory) ConvertTo-EnvironmentRulesResourceId @($Inventory, $Type, $Id)
 }
 
 function Get-EnvironmentRootOrder {
@@ -51,6 +68,7 @@ function Get-EnvironmentRootOrder {
 }
 
 function Get-LifecycleBindingHash([hashtable] $Inventory) {
+    $rules = Get-EnvironmentRules $Inventory
     return Get-LifecycleValueHash @{
         product = $Inventory.product; environment = $Inventory.environment; instance = $Inventory.instance
         target = $Inventory.target; iac = $Inventory.iac; descriptorSha256 = $Inventory.descriptorSha256
@@ -58,7 +76,8 @@ function Get-LifecycleBindingHash([hashtable] $Inventory) {
         roots = @($Inventory.roots | Sort-Object id | ForEach-Object {
             $binding = @{ id = $_.id; adapter = $_.adapter; dependsOn = $_.dependsOn
                 stateKey = $_.stateKey; configurationSha256 = $_.configurationSha256; inputsSha256 = $_.inputsSha256 }
-            if ($_.ContainsKey('namePrefix')) { $binding.namePrefix = $_.namePrefix } else { $binding.resourceGroup = $_.resourceGroup }
+            $scope = Invoke-EnvironmentRules $rules Get-EnvironmentRulesRootBinding @(, $_)
+            foreach ($key in $scope.Keys) { $binding[$key] = $scope[$key] }
             $binding
         })
         observedStates = @($Inventory.roots | Sort-Object id | ForEach-Object {
@@ -69,60 +88,26 @@ function Get-LifecycleBindingHash([hashtable] $Inventory) {
 
 function Assert-LifecycleResource {
     param([hashtable] $Inventory, [hashtable] $Root, [string] $Id, [string] $Type)
-    if ((Get-LifecycleProvider $Inventory) -ceq 'aws') {
-        $scope = "aws:$($Inventory.target.accountId):$($Inventory.target.region):$($Type):"
-        if ($Type -cnotmatch '^aws_[a-z0-9_]+$' -or $Type -cin $script:awsForbiddenTypes -or -not $Id.StartsWith($scope, [StringComparison]::Ordinal) -or
-            $Id.Length -eq $scope.Length -or $Id -match '\s') { throw 'lifecycle.resourceOutsideScope' }
-        $raw = $Id.Substring($scope.Length)
-        if (($Type -ceq 'aws_s3_bucket' -and $raw -ceq $Inventory.target.stateBucket) -or
-            ($Type -ceq 'aws_iam_role' -and $raw -ceq ($Inventory.target.roleArn -split '/')[-1])) { throw 'lifecycle.bootstrapProtected' }
-        return
-    }
-    $prefix = "/subscriptions/$($Inventory.target.subscriptionId)/resourceGroups/$($Root.resourceGroup)/providers/"
-    if (-not $Id.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
-        $Id -match '[?#%\\\s]|/(?:[.][.]?|)(?:/|$)' -or
-        $Type -in @('azurerm_resource_group', 'azurerm_federated_identity_credential', 'azurerm_management_lock')) { throw 'lifecycle.resourceOutsideScope' }
+    Invoke-EnvironmentRules (Get-EnvironmentRules $Inventory) Assert-EnvironmentRulesResource @($Inventory, $Root, $Id, $Type)
 }
 
 function Assert-EnvironmentInventory {
     param([hashtable] $Inventory)
-    $json = ConvertTo-PlatformBootstrapJson $Inventory
-    if (-not ($json | Test-Json -SchemaFile $script:lifecycleSchema -ErrorAction SilentlyContinue)) { throw 'lifecycle.inventoryInvalid' }
-    $aws = (Get-LifecycleProvider $Inventory) -ceq 'aws'
-    if ($aws) {
-        $key = $Inventory.target.stateKmsKeyArn -split ':'
-        if (($Inventory.target.roleArn -split ':')[4] -cne $Inventory.target.accountId -or $key[4] -cne $Inventory.target.accountId -or $key[3] -cne $Inventory.target.region) { throw 'lifecycle.targetInvalid' }
-    }
-    else {
-        foreach ($field in @('tenantId', 'subscriptionId', 'clientId')) {
-            if ([guid] $Inventory.target[$field] -eq [guid]::Empty) { throw 'lifecycle.targetInvalid' }
-        }
-    }
+    $json = ConvertTo-CanonicalJson $Inventory
+    if (-not (Test-ContractJson $json environment-inventory-v1)) { throw 'lifecycle.inventoryInvalid' }
+    $rules = Get-EnvironmentRules $Inventory
+    Invoke-EnvironmentRules $rules Assert-EnvironmentRulesTarget @(, $Inventory)
     $ephemeral = $Inventory.instance.kind -ceq 'Ephemeral'
     if (($ephemeral -and $Inventory.instance.id -ceq 'persistent') -or (-not $ephemeral -and $Inventory.instance.id -cne 'persistent')) { throw 'lifecycle.instanceInvalid' }
     if ($Inventory.dataPolicy -ceq 'DeleteEphemeral' -and (-not $ephemeral -or $Inventory.environment -ceq 'prod')) { throw 'lifecycle.dataPolicyInvalid' }
-    if (-not $aws -and (-not $Inventory.target.container.EndsWith("-$($Inventory.environment)", [StringComparison]::Ordinal) -or $Inventory.target.container -match '--')) { throw 'lifecycle.containerBoundary' }
     if (($Inventory.iac.repository -split '/')[1] -cne "$($Inventory.product)-devops") { throw 'lifecycle.repositoryBoundary' }
     $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    $groups = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $prefixes = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $seen = @{}
     foreach ($root in $Inventory.roots) {
         if (-not $ids.Add($root.id)) { throw 'lifecycle.rootDuplicate' }
-        $kind = $(if ($aws) { if ($root.id -ceq 'hosting') { 'AwsHosting' } else { 'AwsSnsSqs' } } elseif ($root.id -ceq 'hosting') { 'AzureHosting' } else { 'AzureServiceBus' })
-        if ($root.adapter -cne $kind -or $root.stateKey -cne "$($Inventory.product)/$($Inventory.environment)/$($Inventory.instance.id)/$($root.id).tfstate") { throw 'lifecycle.rootBoundary' }
-        if ($aws) {
-            # Every root of an AWS instance shares its short prefix; the tags keep the full names.
-            $expected = $(if ($ephemeral) { "^[a-z][a-z0-9-]{1,10}[a-z0-9]-$(Get-LifecycleAwsPrefixSuffix $Inventory)$" } else { '^[a-z][a-z0-9-]{1,10}[a-z0-9]$' })
-            if ($root.namePrefix -cnotmatch $expected -or $root.namePrefix -match '--') { throw 'lifecycle.prefixBoundary' }
-            [void] $prefixes.Add($root.namePrefix)
-        }
-        else {
-            if (-not $groups.Add($root.resourceGroup)) { throw 'lifecycle.rootDuplicate' }
-            if ($root.resourceGroup -ieq $Inventory.target.stateResourceGroup) { throw 'lifecycle.bootstrapProtected' }
-            $groupPrefix = "rg-$($Inventory.product)-$($Inventory.environment)"
-            if ($ephemeral) { $groupPrefix += "-$($Inventory.instance.id)" }
-            if ($root.resourceGroup -cne "$groupPrefix-$($root.id)") { throw 'lifecycle.groupBoundary' }
-        }
+        if ($root.adapter -cne (Invoke-EnvironmentRules $rules Get-EnvironmentRulesRootAdapter @($root.id)) -or
+            $root.stateKey -cne "$($Inventory.product)/$($Inventory.environment)/$($Inventory.instance.id)/$($root.id).tfstate") { throw 'lifecycle.rootBoundary' }
+        Invoke-EnvironmentRules $rules Assert-EnvironmentRulesRootScope @($Inventory, $root, $seen)
         if ($root.status -cin @('Applying', 'Destroying') -and $null -eq $root.lastOperation) { throw 'lifecycle.transitionInvalid' }
         if ($null -ne $root.plan -and $root.plan.rootId -cne $root.id) { throw 'lifecycle.planRootMismatch' }
         if (($null -eq $root.stateLineage -and $root.stateSerial -ne 0) -or
@@ -139,7 +124,6 @@ function Assert-EnvironmentInventory {
             if (-not $resources.Add($resource.id)) { throw 'lifecycle.resourceDuplicate' }
         }
     }
-    if ($prefixes.Count -gt 1) { throw 'lifecycle.prefixBoundary' }
     if (-not $ids.Contains('hosting') -or ($ids.Contains('messaging') -and $Inventory.components -cnotcontains 'backend')) { throw 'lifecycle.componentUncovered' }
     foreach ($root in $Inventory.roots) {
         foreach ($dependency in $root.dependsOn) { if (-not $ids.Contains($dependency) -or $dependency -ceq $root.id) { throw 'lifecycle.dependencyInvalid' } }
@@ -155,7 +139,7 @@ function Read-EnvironmentInventory {
         if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'lifecycle.inventoryLink' }
         if ((Get-Item -LiteralPath $Path).Length -gt 4194304) { throw 'lifecycle.inventoryInvalid' }
         $json = Get-Content -Raw -LiteralPath $Path
-        if (-not ($json | Test-Json -SchemaFile $script:lifecycleSchema -ErrorAction SilentlyContinue)) { throw 'lifecycle.inventoryInvalid' }
+        if (-not (Test-ContractJson $json environment-inventory-v1)) { throw 'lifecycle.inventoryInvalid' }
         $inventory = $json | ConvertFrom-Json -AsHashtable -Depth 32
         Assert-EnvironmentInventory $inventory
         return $inventory
@@ -181,7 +165,7 @@ function Enter-LifecycleLock([string] $Path) {
 function Write-LifecycleInventory {
     param([hashtable] $Inventory, [string] $Path, [switch] $New)
     Assert-EnvironmentInventory $Inventory
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes((ConvertTo-PlatformBootstrapJson $Inventory) + "`n")
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes((ConvertTo-CanonicalJson $Inventory) + "`n")
     if ($bytes.Length -gt 4194304) { throw 'lifecycle.inventoryTooLarge' }
     if ($New) {
         $file = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
@@ -231,7 +215,7 @@ function Assert-EnvironmentTerraformPlan {
         ($Plan.ContainsKey('deferred_changes') -and @($Plan.deferred_changes).Count -gt 0) -or
         ($Plan.ContainsKey('deferred_action_invocations') -and @($Plan.deferred_action_invocations).Count -gt 0) -or
         ($Plan.ContainsKey('action_invocations') -and @($Plan.action_invocations).Count -gt 0)) { throw 'lifecycle.planIncomplete' }
-    $aws = (Get-LifecycleProvider $Inventory) -ceq 'aws'
+    $rules = Get-EnvironmentRules $Inventory
     $known = @{}; foreach ($resource in $Root.resources) { $known[$resource.id.ToLowerInvariant()] = $resource.address }
     $changes = @()
     if ($Plan.ContainsKey('resource_changes')) {
@@ -240,9 +224,7 @@ function Assert-EnvironmentTerraformPlan {
     }
     foreach ($change in $changes) {
         if ($change.mode -ceq 'data') { continue }
-        $forbidden = $(if ($aws) { $change.type -cnotmatch '^aws_' -or $change.type -cin $script:awsForbiddenTypes }
-            else { $change.type -cnotmatch '^azurerm_' -or $change.type -cin @('azurerm_resource_group', 'azurerm_federated_identity_credential', 'azurerm_management_lock') })
-        if ($change.mode -cne 'managed' -or $forbidden) { throw 'lifecycle.planResourceForbidden' }
+        if ($change.mode -cne 'managed' -or (Invoke-EnvironmentRules $rules Test-EnvironmentRulesPlanTypeForbidden @($change.type))) { throw 'lifecycle.planResourceForbidden' }
         if ($change.change.ContainsKey('importing') -and $null -ne $change.change.importing) { throw 'lifecycle.planImportForbidden' }
         foreach ($action in $change.change.actions) {
             if (($Operation -ceq 'Create' -and $action -cnotin @('no-op', 'create', 'update')) -or ($Operation -ceq 'Destroy' -and $action -cnotin @('no-op', 'delete'))) { throw 'lifecycle.planOperationMismatch' }
@@ -257,29 +239,8 @@ function Assert-EnvironmentTerraformPlan {
         $after = $null; if ($change.change.ContainsKey('after')) { $after = $change.change.after }
         if ($null -ne $after) {
             if ($after.ContainsKey('id') -and $after.id) { Assert-LifecycleResource $Inventory $Root (ConvertTo-LifecycleResourceId $Inventory $change.type $after.id) $change.type }
-            if ($aws) { Assert-LifecycleAwsPlanScope $Inventory $after; continue }
-            if ($after.ContainsKey('resource_group_name') -and $after.resource_group_name -ine $Root.resourceGroup) { throw 'lifecycle.planScopeMismatch' }
-            if ($after.ContainsKey('scope') -and $after.scope) {
-                $scope = "/subscriptions/$($Inventory.target.subscriptionId)/resourceGroups/$($Root.resourceGroup)"
-                if ($after.scope -ine $scope -and -not $after.scope.StartsWith("$scope/", [StringComparison]::OrdinalIgnoreCase)) { throw 'lifecycle.planScopeMismatch' }
-            }
+            Invoke-EnvironmentRules $rules Assert-EnvironmentRulesPlanScope @($Inventory, $Root, $after)
         }
-    }
-}
-
-function Assert-LifecycleAwsPlanScope {
-    param([hashtable] $Inventory, [hashtable] $After)
-    # An ARN known at plan time must belong to the account and, when regional, to the region.
-    if ($After.ContainsKey('arn') -and $After.arn -is [string] -and $After.arn) {
-        $parts = $After.arn -split ':'
-        if ($parts.Count -lt 6 -or $parts[0] -cne 'arn' -or $parts[1] -cne 'aws' -or
-            ($parts[3] -and $parts[3] -cne $Inventory.target.region) -or ($parts[4] -and $parts[4] -cne $Inventory.target.accountId)) { throw 'lifecycle.planScopeMismatch' }
-    }
-    # Taggable resources carry the instance tags through the provider default_tags.
-    if ($After.ContainsKey('tags_all') -and $After.tags_all -is [Collections.IDictionary]) {
-        $tags = $After.tags_all
-        if ($tags['hexagon:product'] -cne $Inventory.product -or $tags['hexagon:environment'] -cne $Inventory.environment -or
-            $tags['hexagon:instance'] -cne $Inventory.instance.id) { throw 'lifecycle.planScopeMismatch' }
     }
 }
 
@@ -317,7 +278,7 @@ function Invoke-LifecyclePort {
     param([scriptblock] $Port, [string] $Action, [hashtable] $Inventory, [hashtable] $Root, [hashtable] $Extra = @{})
     $request = @{ action = $Action; product = $Inventory.product; environment = $Inventory.environment; instanceId = $Inventory.instance.id; target = $Inventory.target; root = $Root; revision = $Inventory.revision }
     foreach ($key in $Extra.Keys) { $request[$key] = $Extra[$key] }
-    $requestCopy = (ConvertTo-PlatformBootstrapJson $request) | ConvertFrom-Json -AsHashtable -Depth 32
+    $requestCopy = (ConvertTo-CanonicalJson $request) | ConvertFrom-Json -AsHashtable -Depth 32
     try { $response = & $Port $requestCopy }
     catch { throw "lifecycle.port.$Action" }
     if ($null -eq $response -or $response -isnot [Collections.IDictionary]) { throw "lifecycle.port.$Action" }
@@ -327,12 +288,7 @@ function Invoke-LifecyclePort {
 function Assert-LifecyclePreflight {
     param([hashtable] $Inventory, [hashtable] $Root, [scriptblock] $Port, [hashtable] $Artifacts = @{})
     $result = Invoke-LifecyclePort $Port Preflight $Inventory $Root $Artifacts
-    $targetMatches = $(if ((Get-LifecycleProvider $Inventory) -ceq 'aws') {
-            $result.accountId -ceq $Inventory.target.accountId -and $result.region -ceq $Inventory.target.region -and
-            $result.roleArn -ceq $Inventory.target.roleArn -and $result.stateBucket -ceq $Inventory.target.stateBucket }
-        else {
-            $result.tenantId -ieq $Inventory.target.tenantId -and $result.subscriptionId -ieq $Inventory.target.subscriptionId -and
-            $result.clientId -ieq $Inventory.target.clientId -and $result.container -ceq $Inventory.target.container })
+    $targetMatches = Invoke-EnvironmentRules (Get-EnvironmentRules $Inventory) Test-EnvironmentRulesPreflightTarget @($Inventory, $result)
     if ($result.verified -isnot [bool] -or $result.verified -ne $true -or -not $targetMatches -or $result.product -cne $Inventory.product -or $result.environment -cne $Inventory.environment -or $result.instanceId -cne $Inventory.instance.id -or
         $result.configurationSha256 -cne $Root.configurationSha256 -or $result.inputsSha256 -cne $Root.inputsSha256 -or $result.iacSnapshotSha256 -cne $Inventory.iac.snapshotSha256 -or
         $result.stateKey -cne $Root.stateKey) { throw 'lifecycle.preflightMismatch' }
@@ -347,8 +303,7 @@ function Save-LifecycleCheckpoint {
     $hash = Get-LifecycleFileHash $Path
     $result = Invoke-LifecyclePort $Port Persist $Inventory $Root @{ inventoryPath = $Path; sha256 = $hash }
     $journalKey = "$($Inventory.product)/$($Inventory.environment)/$($Inventory.instance.id)/inventory.json"
-    $storeMatches = $(if ((Get-LifecycleProvider $Inventory) -ceq 'aws') { $result.stateBucket -ceq $Inventory.target.stateBucket }
-        else { $result.storageAccount -ceq $Inventory.target.storageAccount -and $result.container -ceq $Inventory.target.container })
+    $storeMatches = Invoke-EnvironmentRules (Get-EnvironmentRules $Inventory) Test-EnvironmentRulesStore @($Inventory, $result)
     if ($result.durable -isnot [bool] -or $result.durable -ne $true -or $result.sha256 -cne $hash -or $result.revision -ne $Inventory.revision -or
         $result.journalKey -cne $journalKey -or -not $storeMatches -or
         $result.snapshotSha256 -cne $Inventory.iac.snapshotSha256) { throw 'lifecycle.checkpointNotDurable' }
@@ -516,4 +471,4 @@ function Clear-EnvironmentPlans {
     finally { $lock.Dispose() }
 }
 
-Export-ModuleMember -Function Assert-EnvironmentInventory, Assert-EnvironmentInitialInventory, Read-EnvironmentInventory, New-EnvironmentInventory, Get-EnvironmentRootOrder, Get-LifecycleFileHash, Assert-EnvironmentTerraformPlan, Add-EnvironmentRootPlan, Invoke-EnvironmentRootOperation, Sync-EnvironmentRoot, Set-EnvironmentRootInputs, Clear-EnvironmentPlans, ConvertTo-LifecycleResourceId
+Export-ModuleMember -Function Assert-EnvironmentInventory, Assert-EnvironmentInitialInventory, Read-EnvironmentInventory, New-EnvironmentInventory, Get-EnvironmentRootOrder, Get-LifecycleFileHash, Assert-EnvironmentTerraformPlan, Add-EnvironmentRootPlan, Invoke-EnvironmentRootOperation, Sync-EnvironmentRoot, Set-EnvironmentRootInputs, Clear-EnvironmentPlans, ConvertTo-LifecycleResourceId, Get-EnvironmentRules, Get-EnvironmentAdapterRules, Invoke-EnvironmentRules

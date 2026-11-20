@@ -1,18 +1,20 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'EnvironmentSnapshot.psm1')
-Import-Module (Join-Path $PSScriptRoot 'PlatformBootstrap.psm1')
+Import-Module (Join-Path $PSScriptRoot 'CanonicalJson.psm1')
 Import-Module (Join-Path $PSScriptRoot 'StaticWebConfiguration.psm1')
 
 function New-StaticWebPayload {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string] $Archive, [string] $ArchiveSha256, $Manifest, [hashtable] $Outputs,
-        [string] $ReleaseSha256, [string] $DeliverySha256, [string] $Directory)
+        [string] $ReleaseSha256, [string] $DeliverySha256, [string] $Directory, [hashtable] $HostFiles = @{})
     if (-not $PSCmdlet.ShouldProcess($Directory, 'Prepare the verified SPA with public deployment configuration')) { return }
     foreach ($hash in @($ArchiveSha256, $ReleaseSha256, $DeliverySha256)) { if ($hash -cnotmatch '^[0-9a-f]{64}$') { throw 'lifecycle.web.payloadIdentityInvalid' } }
     if ((Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ArchiveSha256 -or (Test-Path -LiteralPath $Directory)) { throw 'lifecycle.web.bundleChanged' }
     & (Join-Path $PSScriptRoot 'Test-StaticBundle.ps1') -Archive $Archive
     $overlay = ConvertTo-StaticWebConfiguration $Manifest $Outputs
+    $reserved = @(Get-StaticWebReservedNames)
+    foreach ($name in $HostFiles.Keys) { if ($name -cnotin $reserved -or $overlay.ContainsKey($name)) { throw 'lifecycle.web.hostFileInvalid' }; $overlay[$name] = $HostFiles[$name] }
     [IO.Directory]::CreateDirectory($Directory) | Out-Null
     $file = [IO.File]::OpenRead($Archive); $gzip = [IO.Compression.GZipStream]::new($file, [IO.Compression.CompressionMode]::Decompress); $tar = [System.Formats.Tar.TarReader]::new($gzip)
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $files = @{}
@@ -20,7 +22,7 @@ function New-StaticWebPayload {
         while ($null -ne ($entry = $tar.GetNextEntry())) {
             $name = $entry.Name -creplace '^\./', ''
             if ($entry.EntryType -eq [System.Formats.Tar.TarEntryType]::Directory) { continue }
-            if ($name -iin @('hexagon-deployment.json', 'runtime-config.json', 'staticwebapp.config.json') -or -not $names.Add($name)) { throw 'lifecycle.web.reservedOrDuplicateFile' }
+            if ($name -iin $reserved -or -not $names.Add($name)) { throw 'lifecycle.web.reservedOrDuplicateFile' }
             $path = [IO.Path]::GetFullPath((Join-Path $Directory $name))
             if (-not $path.StartsWith([IO.Path]::GetFullPath($Directory) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::Ordinal)) { throw 'lifecycle.web.bundlePathInvalid' }
             [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
@@ -31,17 +33,17 @@ function New-StaticWebPayload {
     }
     finally { $tar.Dispose(); $gzip.Dispose(); $file.Dispose() }
     foreach ($name in $overlay.Keys) {
-        $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $overlay[$name]) + "`n")
+        $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $overlay[$name]) + "`n")
         [IO.File]::WriteAllBytes((Join-Path $Directory $name), $bytes)
         $files[$name] = @{ sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant(); length = $bytes.Length }
     }
     $identity = @{ archiveSha256 = $ArchiveSha256; releaseSha256 = $ReleaseSha256; deliverySha256 = $DeliverySha256; overlaySha256 = Get-SnapshotHash $overlay; contentSha256 = Get-SnapshotHash $files }
     $deploymentSha256 = Get-SnapshotHash $identity
     $marker = @{ apiVersion = 'hexagon.ec/public-web-deployment/v1'; deploymentSha256 = $deploymentSha256 } + $identity
-    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $marker) + "`n")
+    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $marker) + "`n")
     [IO.File]::WriteAllBytes((Join-Path $Directory 'hexagon-deployment.json'), $bytes)
     $files['hexagon-deployment.json'] = @{ sha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant(); length = $bytes.Length }
-    return @{ directory = [IO.Path]::GetFullPath($Directory); deploymentSha256 = $deploymentSha256; identity = $identity; files = $files }
+    return @{ directory = [IO.Path]::GetFullPath($Directory); deploymentSha256 = $deploymentSha256; identity = $identity; files = $files; hostFiles = @($HostFiles.Keys | Sort-Object) }
 }
 
 function Assert-StaticWebPayload([hashtable] $Payload) {
@@ -60,11 +62,11 @@ function New-PublicWebHttpClient {
     return $client
 }
 
-# Only the default host of the provider's site: Azure Static Web Apps or CloudFront (ADR 0025).
+# Only the default host of the site, as the web host modules of the repository declare it.
 function Get-PublicWebFile([string] $Origin, [string] $Path, [long] $MaximumBytes) {
     $address = [uri] $Origin
     if ($address.Scheme -cne 'https' -or $address.Port -ne 443 -or $address.UserInfo -or $address.Query -or $address.Fragment -or $address.AbsolutePath -cne '/' -or
-        $address.Host -cnotmatch '^(?:[a-z0-9-]+[.](?:[a-z0-9-]+[.])?azurestaticapps[.]net|[a-z0-9]+[.]cloudfront[.]net)$' -or $Path.StartsWith('/') -or $Path.Contains('\') -or $Path -match '(^|/)[.][.]?(/|$)|[?#]') { throw 'lifecycle.web.publicEndpointInvalid' }
+        -not (Test-StaticWebOrigin $address.Host) -or $Path.StartsWith('/') -or $Path.Contains('\') -or $Path -match '(^|/)[.][.]?(/|$)|[?#]') { throw 'lifecycle.web.publicEndpointInvalid' }
     $escaped = (($Path -split '/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
     $client = New-PublicWebHttpClient; $response = $null; $stream = $null
     $cancel = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(30))
@@ -96,7 +98,8 @@ function Test-StaticWebServing {
     Assert-StaticWebPayload $Payload
     $timer = [Diagnostics.Stopwatch]::StartNew()
     # The host consumes its control file; verify its routing/header effects rather than assuming it is public.
-    $publicNames = @($Payload.files.Keys | Where-Object { $_ -cne 'staticwebapp.config.json' })
+    $hostFiles = @($(if ($Payload.ContainsKey('hostFiles')) { $Payload.hostFiles }))
+    $publicNames = @($Payload.files.Keys | Where-Object { $_ -cnotin $hostFiles })
     foreach ($name in @('hexagon-deployment.json') + @($publicNames | Where-Object { $_ -cne 'hexagon-deployment.json' } | Sort-Object) + @('hexagon-deployment.json')) {
         & $Heartbeat | Out-Null
         if ($timer.Elapsed.TotalSeconds -gt 600) { throw 'lifecycle.web.publicVerificationTimeout' }

@@ -22,15 +22,14 @@ public sealed class MessagingFreeDatabaseTests
             CREATE TABLE platform."Tenants" (id integer);
             CREATE TABLE platform."Memberships" (id integer);
             """, db)) { await prepare.ExecuteNonQueryAsync(); }
-        var settings = new BootstrapSettings("example.postgres.database.azure.com", "product", "maintenance", Guid.NewGuid().ToString(),
-            new() { ["api"] = new(Guid.NewGuid().ToString(), true) }, MessagingEnabled: false);
-        await DatabaseBootstrapper.GrantRuntimeAccessAsync(db, settings, CancellationToken.None);
+        var readDirectoryByRole = new Dictionary<string, bool> { ["api"] = true };
+        await DatabaseBootstrapper.GrantRuntimeAccessAsync(db, "product", readDirectoryByRole, messagingEnabled: false, CancellationToken.None);
         await using (var query = new NpgsqlCommand("SELECT pg_has_role('api','hexagon_app','MEMBER') AND NOT EXISTS (SELECT FROM pg_roles WHERE rolname='hexagon_outbox')", db))
         {
             Assert.True((bool)(await query.ExecuteScalarAsync())!);
         }
         await using (var legacy = new NpgsqlCommand("CREATE ROLE hexagon_outbox NOLOGIN; GRANT hexagon_outbox TO api", db)) { await legacy.ExecuteNonQueryAsync(); }
-        await DatabaseBootstrapper.GrantRuntimeAccessAsync(db, settings, CancellationToken.None);
+        await DatabaseBootstrapper.GrantRuntimeAccessAsync(db, "product", readDirectoryByRole, messagingEnabled: false, CancellationToken.None);
         await using var narrowed = new NpgsqlCommand("SELECT NOT pg_has_role('api','hexagon_outbox','MEMBER')", db);
         Assert.True((bool)(await narrowed.ExecuteScalarAsync())!);
     }

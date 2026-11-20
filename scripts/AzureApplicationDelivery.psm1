@@ -1,15 +1,16 @@
 Import-Module (Join-Path $PSScriptRoot 'AzureKeycloakDelivery.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AuthorizationDelivery.psm1')
+Import-Module (Join-Path $PSScriptRoot 'ContractSchemas.psm1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('PlatformBootstrap', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'AzureEnvironmentStore', 'TerraformAzureLifecycle', 'AzureLifecycleInputs', 'ApplicationArtifacts', 'AzureOciDelivery', 'AzureMaintenanceDelivery', 'AzureWebDelivery', 'StaticWebPublication', 'AzureAcceptance', 'AcceptanceCleanup', 'AcceptanceRun')) {
+foreach ($name in @('CanonicalJson', 'EnvironmentLifecycle', 'EnvironmentSnapshot', 'AzureEnvironmentStore', 'TerraformAzureLifecycle', 'AzureLifecycleInputs', 'ApplicationArtifacts', 'AzureOciDelivery', 'AzureMaintenanceDelivery', 'AzureWebDelivery', 'StaticWebPublication', 'AcceptanceContracts', 'AzureAcceptance', 'AcceptanceCleanup', 'AcceptanceRun')) {
     Import-Module (Join-Path $PSScriptRoot "$name.psm1")
 }
 
 function Assert-AzureDeliveryJournal([hashtable] $Context, [hashtable] $Journal, [string] $DeliverySha256) {
     $json = ConvertTo-Json -InputObject $Journal -Depth 24
     $inventory = $Context.inventory
-    if (-not ($json | Test-Json -SchemaFile (Join-Path $PSScriptRoot '../contracts/schemas/application-delivery-journal-v1.schema.json') -ErrorAction SilentlyContinue) -or
+    if (-not (Test-ContractJson $json application-delivery-journal-v1) -or
         $Journal.product -cne $inventory.product -or $Journal.environment -cne $inventory.environment -or $Journal.instanceId -cne $inventory.instance.id -or
         $Journal.releaseSha256 -cne $inventory.releaseSha256 -or $Journal.deliverySha256 -cne $DeliverySha256 -or $Journal.iacCommit -cne $inventory.iac.commit -or
         $Journal.targetSha256 -cne (Get-SnapshotHash $inventory.target)) { throw 'lifecycle.delivery.journalInvalid' }
@@ -49,11 +50,11 @@ function Save-AzureDeliveryJournal {
     $uri = "https://$($Context.inventory.target.storageAccount).blob.core.windows.net/$($Context.inventory.target.container)/$($Context.prefix)/delivery.json"
     $headers = @{ 'x-ms-blob-type' = 'BlockBlob' }
     if ($Context.deliveryEtag) { $headers['If-Match'] = $Context.deliveryEtag } else { $headers['If-None-Match'] = '*' }
-    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $Journal) + "`n")
+    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $Journal) + "`n")
     $write = Invoke-AzureLifecycleHttp $Context PUT $uri $headers $bytes
     if ($write.status -ne 201) { throw 'lifecycle.delivery.journalConflict' }
     $read = Read-AzureDeliveryJournal $Context $Journal.deliverySha256
-    $observed = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $read) + "`n")
+    $observed = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $read) + "`n")
     if ((Get-LifecycleBytesHash $observed) -cne (Get-LifecycleBytesHash $bytes)) { throw 'lifecycle.delivery.journalNotDurable' }
 }
 
@@ -65,9 +66,9 @@ function Get-AzureDeliveryReferences([hashtable] $Release, [string] $Registry) {
     $references = @{}
     foreach ($id in $Release.artifacts.backend.Keys) {
         if ($id -ceq 'database-bootstrap') { throw 'lifecycle.delivery.reservedWorkloadId' }
-        $references[$id] = Get-DeliveryImageTarget $Release.artifacts.backend[$id] $Registry
+        $references[$id] = Get-AzureDeliveryImageTarget $Release.artifacts.backend[$id] $Registry
     }
-    $references['database-bootstrap'] = Get-DeliveryImageTarget $Release.artifacts.databaseBootstrap.image $Registry
+    $references['database-bootstrap'] = Get-AzureDeliveryImageTarget $Release.artifacts.databaseBootstrap.image $Registry
     return $references
 }
 
@@ -101,10 +102,10 @@ function Assert-AzureDeliveryImages([hashtable] $Journal, [hashtable] $Hosting) 
 function Get-AzureDeliveryBoundInputs([hashtable] $Context, [hashtable] $Inputs) {
     if ($Inputs.ContainsKey('messaging_enabled') -and $Inputs.messaging_enabled -eq $false) {
         if (@($Context.inventory.roots | Where-Object id -CEQ 'messaging').Count -ne 0) { throw 'lifecycle.delivery.messagingUnexpected' }
-        return (ConvertTo-PlatformBootstrapJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40
+        return (ConvertTo-CanonicalJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40
     }
     $messaging = Get-AzureLifecycleDeploymentState $Context messaging
-    $value = (ConvertTo-PlatformBootstrapJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40
+    $value = (ConvertTo-CanonicalJson $Inputs) | ConvertFrom-Json -AsHashtable -Depth 40
     if ($messaging.outputs.workload_bindings -isnot [Collections.IDictionary]) { throw 'lifecycle.delivery.messagingBindingsUnavailable' }
     foreach ($id in $messaging.outputs.workload_bindings.Keys) {
         if (-not $value.workloads.ContainsKey($id)) { throw 'lifecycle.delivery.bindingWorkloadUnknown' }
@@ -217,7 +218,7 @@ function Set-AzureDeliveryInputs([hashtable] $Context, [hashtable] $Value, [stri
     $directory = Join-Path $Context.runtime "inputs-$([guid]::NewGuid().ToString('N'))"
     [IO.Directory]::CreateDirectory($directory) | Out-Null
     foreach ($root in $Context.inventory.roots) {
-        $bytes = $(if ($root.id -ceq 'hosting') { [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $Value) + "`n") } else { $Context.snapshot.files["inputs/$($root.id).tfvars.json"] })
+        $bytes = $(if ($root.id -ceq 'hosting') { [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $Value) + "`n") } else { $Context.snapshot.files["inputs/$($root.id).tfvars.json"] })
         [IO.File]::WriteAllBytes((Join-Path $directory "$($root.id).tfvars.json"), $bytes)
     }
     Update-AzureLifecycleInputs -Context $Context -RootId hosting -InputDirectory $directory -Repository $Repository -TrustedCommit $TrustedCommit -InventoryPath (Join-Path $Workspace 'inventory.json') -Archive (Join-Path $Workspace 'snapshot.zip') -AllowUnchanged -Confirm:$false
@@ -272,7 +273,9 @@ function Invoke-AzureApplicationStage {
         if ($hosting.inputs.application_rollout_enabled -or $journal.activated) { throw 'lifecycle.delivery.alreadyActivated' }
         $renew = (Get-Command Assert-AzureLifecycleLease).ScriptBlock
         $heartbeat = { & $renew $Context }.GetNewClosure()
-        $candidates = Receive-ApplicationCandidates $Delivery $Release $hosting.registry.login_server (Join-Path $Context.runtime 'candidates') $heartbeat -Confirm:$false
+        $imageRegistry = $hosting.registry.login_server; $resolveImage = (Get-Command Get-AzureDeliveryImageTarget).ScriptBlock
+        $imageTarget = { param($reference) & $resolveImage $reference $imageRegistry }.GetNewClosure()
+        $candidates = Receive-ApplicationCandidates $Delivery $Release $imageTarget (Join-Path $Context.runtime 'candidates') $heartbeat -Confirm:$false
         Save-AzureDeliveryJournal $Context $journal -Confirm:$false
         foreach ($component in @('backend', 'devops')) {
             foreach ($id in $candidates[$component].images.Keys) {
@@ -357,8 +360,8 @@ function Invoke-AzureApplicationStage {
                 Get-AzureBackendHealth $Context $hosting | Out-Null
                 if ($Stage -ceq 'PrepareAcceptance') {
                     $consent = New-AcceptanceConsent $Context.inventory $DeliverySha256 $payload.deploymentSha256
-                    if (-not ((ConvertTo-Json -InputObject $consent -Depth 20) | Test-Json -SchemaFile (Join-Path $PSScriptRoot '../contracts/schemas/acceptance-cleanup-consent-v1.schema.json') -ErrorAction SilentlyContinue)) { throw 'lifecycle.acceptance.consentInvalid' }
-                    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $consent)); $hash = Get-LifecycleBytesHash $bytes
+                    if (-not (Test-ContractJson (ConvertTo-Json -InputObject $consent -Depth 20) acceptance-cleanup-consent-v1)) { throw 'lifecycle.acceptance.consentInvalid' }
+                    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $consent)); $hash = Get-LifecycleBytesHash $bytes
                     Publish-AzureLifecycleObject $Context "$($Context.prefix)/consents/$hash.json" $bytes $hash -Confirm:$false
                     $details.reviewSha256 = $hash
                 }
@@ -381,7 +384,10 @@ function Invoke-AzureApplicationStage {
                     }.GetNewClosure()
                     $save = (Get-Command Save-AzureDeliveryJournal).ScriptBlock
                     $persist = { & $save $Context $journal -Confirm:$false }.GetNewClosure()
-                    $details = Invoke-AcceptanceRun $Context $journal $consent $ReviewSha256 $configuration $Workspace $seed $persist -Confirm:$false
+                    $details = Invoke-AcceptanceRun $Context $journal $consent $ReviewSha256 $configuration $Workspace $seed $persist -Confirm:$false `
+                        -Browser { param($context, $configuration) Invoke-AzureBrowserAcceptance $context $configuration -Confirm:$false } `
+                        -Cleanup { param($context, $consent, $workspace) Invoke-AzureAcceptanceCleanup $context $consent $workspace -Confirm:$false } `
+                        -PersistEvidence { param($context, $evidence) Save-AcceptanceEvidence $context $evidence -Confirm:$false }
                 }
             }
             { $_ -cin @('PublishWeb', 'VerifyServing') } {
@@ -408,7 +414,7 @@ function Invoke-AzureApplicationStage {
                     $evidence = @{ apiVersion = 'hexagon.ec/serving-evidence/v1'; product = $Context.inventory.product; environment = $Context.inventory.environment; instanceId = $Context.inventory.instance.id
                         releaseSha256 = $Context.inventory.releaseSha256; deliverySha256 = $DeliverySha256; observedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); hostingInputsSha256 = $inputsSha256
                         backend = $backend; web = $serving; applicationVerified = $false }
-                    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-PlatformBootstrapJson $evidence)); $hash = Get-LifecycleBytesHash $bytes
+                    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $evidence)); $hash = Get-LifecycleBytesHash $bytes
                     Publish-AzureLifecycleObject $Context "$($Context.prefix)/evidence/$hash.json" $bytes $hash -Confirm:$false
                     $journal.web.status = 'Verified'; $journal.web.evidenceSha256 = $hash
                     Save-AzureDeliveryJournal $Context $journal -Confirm:$false

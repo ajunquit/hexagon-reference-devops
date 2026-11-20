@@ -30,7 +30,7 @@ la preparación y requiere una rotación explícita, no una sustitución silenci
 en el JSON, comandos, GitHub, documentación o PR.
 
 El procedimiento está probado con Keycloak 26.6 y FGAP v2. Verifica versión/destino, identidad,
-UUID y scopes antes de escribir. Admite issuer directo de Azure y el prefijo `/auth` de AWS.
+UUID y scopes antes de escribir. Admite el issuer directo y el prefijo `/auth` detrás de una CDN.
 Las llamadas no siguen redirects y los errores no imprimen cuerpos ni tokens. Una respuesta
 ambigua detiene la etapa; otra ejecución consulta lo existente y converge, sin duplicar clientes.
 
@@ -63,8 +63,8 @@ El resultado público contiene issuer/audiencia/scope y estos tres ajustes del A
 | `Auth__Authorization__ClientId` | Identidad delegada de ese producto y ambiente. |
 
 `Auth__Authorization__ClientSecret` va exclusivamente en `workloads.<api>.secret_references`:
-Key Vault con URI versionada y vault en Azure; ARN del secreto propio del ambiente en Secrets Manager
-en AWS. El valor nunca pasa por Terraform. El operador carga en Keycloak la misma credencial que
+la referencia al almacén de secretos de la nube, con la forma que fija su política de hosting. El
+valor nunca pasa por Terraform. El operador carga en Keycloak la misma credencial que
 referencia el workload; este comando no publica secretos ni despliega recursos cloud.
 
 Los contratos backend nuevos declaran `identity.authorization = "keycloak-uma"`. La exportación

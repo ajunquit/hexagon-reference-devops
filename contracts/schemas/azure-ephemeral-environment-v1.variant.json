@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Narrows the cloud definitions of ephemeral-environment-v1.schema.json for Azure; scripts/ContractSchemas.psm1 composes them.",
+  "$defs": {
+    "cloudDocument": {
+      "required": ["location", "bootstrapContainer", "protectedResourceGroups"],
+      "properties": {
+        "inventory": { "properties": {"target": {"required": ["subscriptionId"]}} },
+        "location": { "type": "string", "pattern": "^[a-z0-9]{2,30}$" },
+        "bootstrapContainer": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$" },
+        "protectedResourceGroups": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^rg-[a-z0-9-]{1,76}$" }
+        }
+      }
+    }
+  }
+}

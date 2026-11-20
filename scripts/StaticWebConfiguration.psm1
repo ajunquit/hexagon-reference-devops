@@ -15,12 +15,28 @@ function ConvertTo-StaticWebConfiguration {
     # Select only declared public fields. Terraform outputs may contain unrelated sensitive values.
     return @{
         'runtime-config.json' = @{ apiUrl = $apiUrl; authentication = @{ authority = [string] $auth.authority; clientId = [string] $auth.clientId; scope = [string] $auth.scope } }
-        'staticwebapp.config.json' = @{
-            navigationFallback = @{ rewrite = '/index.html'; exclude = @('/runtime-config.json', '/assets/*', '/*.{css,js,map,ico,png,svg,woff,woff2}') }
-            globalHeaders = @{ 'Cache-Control' = 'no-cache'; 'X-Content-Type-Options' = 'nosniff'; 'Referrer-Policy' = 'no-referrer' }
-            routes = @(@{ route = '/runtime-config.json'; headers = @{ 'Cache-Control' = 'no-store' } }, @{ route = '/index.html'; headers = @{ 'Cache-Control' = 'no-store' } })
-        }
     }
 }
 
-Export-ModuleMember -Function ConvertTo-StaticWebConfiguration
+# The host of each cloud lives in a module named *WebHost.psm1 next to this one: it declares the files
+# that only the host reads (never part of a bundle, never verified as public content) and the
+# default public hosts that the serving checks accept. The modules export nothing to the caller.
+$script:webHosts = $null
+
+function Get-StaticWebHostModules {
+    if ($null -eq $script:webHosts) {
+        $script:webHosts = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*WebHost.psm1' -File | Sort-Object Name |
+            ForEach-Object { Import-Module $_.FullName -PassThru -DisableNameChecking })
+    }
+    return $script:webHosts
+}
+
+function Get-StaticWebReservedNames {
+    return @(@('hexagon-deployment.json', 'runtime-config.json') + @(Get-StaticWebHostModules | ForEach-Object { & $_ { Get-WebHostReservedNames } }))
+}
+
+function Test-StaticWebOrigin([string] $HostName) {
+    return @(Get-StaticWebHostModules | Where-Object { & $_ { param($h) Test-WebHostOrigin $h } $HostName }).Count -gt 0
+}
+
+Export-ModuleMember -Function ConvertTo-StaticWebConfiguration, Get-StaticWebReservedNames, Test-StaticWebOrigin

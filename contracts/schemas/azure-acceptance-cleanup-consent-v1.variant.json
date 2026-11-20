@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Narrows the cloud definitions of acceptance-cleanup-consent-v1.schema.json for Azure; scripts/ContractSchemas.psm1 composes them.",
+  "$defs": {
+    "cloudRoot": {
+      "required": ["resourceGroup"],
+      "not": { "required": ["namePrefix"] },
+      "properties": {
+        "resources": {
+          "items": {
+            "properties": {
+              "id": { "pattern": "^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/[^ ]+$" },
+              "type": { "pattern": "^azurerm_[a-z0-9_]+$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
